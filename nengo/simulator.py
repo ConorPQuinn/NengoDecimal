@@ -100,6 +100,7 @@ class Simulator(object):
             then you can pass in a ``nengo.builder.Model`` instance.
         """
         dt = float(dt)  # make sure it's a float (for division purposes)
+
         if model is None:
             self.model = Model(dt=dt,
                                label="%s, dt=%f" % (network, dt),
@@ -108,7 +109,6 @@ class Simulator(object):
         else:
             self.model = model
 
-        #print(network)
         if network is not None:
             # Build the network into the model
             self.model.build(network)
@@ -119,11 +119,10 @@ class Simulator(object):
         self.rng = np.random.RandomState(self.seed)
 
         # -- map from Signal.base -> ndarray
-        self.signals = SignalDict(__time__=np.asarray(npext.castDecimal(0), dtype=self.dtype))
-        #print(self.model)
-        #print(self.model.operators)
+        self.signals = SignalDict(__time__=np.asarray(0.0, dtype=self.dtype))
         for op in self.model.operators:
             op.init_signals(self.signals)
+
         self.dg = operator_depencency_graph(self.model.operators)
         self._step_order = [node for node in toposort(self.dg)
                             if hasattr(node, 'make_step')]

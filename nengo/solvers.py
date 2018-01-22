@@ -10,7 +10,7 @@ import collections
 import logging
 
 import numpy as np
-import decimal as dc
+
 from nengo.params import Parameter
 import nengo.utils.numpy as npext
 from nengo.utils.compat import range, with_metaclass, iteritems
@@ -46,9 +46,8 @@ def cholesky(A, y, sigma, transpose=None):
         L = np.linalg.cholesky(G)
         L = np.linalg.inv(L.T)
         x = np.dot(L, np.dot(L.T, b))
-    
+
     x = np.dot(A.T, x) if transpose else x
-    x = npext.castDecimal(x)
     info = {'rmses': npext.rms(y - np.dot(A, x), axis=0)}
     return x, info
 
@@ -356,7 +355,7 @@ class LstsqL2(_LstsqL2Solver):
     """Least-squares with L2 regularization."""
 
     def __call__(self, A, Y, rng=None, E=None):
-        sigma = dc.Decimal(self.reg) * A.max()
+        sigma = self.reg * A.max()
         X, info = self.solver(A, Y, sigma, **self.kwargs)
         return self.mul_encoders(X, E), info
 

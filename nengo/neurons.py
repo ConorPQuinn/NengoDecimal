@@ -3,11 +3,10 @@ from __future__ import division
 import logging
 
 import numpy as np
-import decimal as dc
+
 from nengo.params import Parameter, NumberParam
 from nengo.utils.compat import range
 from nengo.utils.neurons import settled_firingrate
-import nengo.utils.numpy as npext
 
 logger = logging.getLogger(__name__)
 
@@ -66,9 +65,9 @@ class NeuronType(object):
         max_rate = max_rates.max()
 
         # Start with dummy gain and bias so x == J in rate calculation
-        gain = npext.castDecimal(np.ones(J_steps))
-        bias = npext.castDecimal(np.zeros(J_steps))
-        rate = npext.castDecimal(np.zeros(J_steps))
+        gain = np.ones(J_steps)
+        bias = np.zeros(J_steps)
+        rate = np.zeros(J_steps)
 
         # Find range of J that will achieve max rates
         while rate[-1] < max_rate and J_max < 100:
@@ -77,8 +76,8 @@ class NeuronType(object):
             rate = self.rates(J, gain, bias)
         J_threshold = J[np.where(rate <= 1e-16)[0][-1]]
 
-        gain = npext.castDecimal(np.zeros_like(max_rates))
-        bias = npext.castDecimal(np.zeros_like(max_rates))
+        gain = np.zeros_like(max_rates)
+        bias = np.zeros_like(max_rates)
         for i in range(intercepts.size):
             ix = np.where(rate > max_rates[i])[0]
             if len(ix) == 0:
@@ -168,8 +167,8 @@ class LIFRate(NeuronType):
     probeable = ['rates']
 
     def __init__(self, tau_rc=0.02, tau_ref=0.002):
-        self.tau_rc = npext.castDecimal(tau_rc)
-        self.tau_ref = npext.castDecimal(tau_ref)
+        self.tau_rc = tau_rc
+        self.tau_ref = tau_ref
 
     @property
     def _argreprs(self):
@@ -199,16 +198,15 @@ class LIFRate(NeuronType):
         intercepts : list of floats
             X-intercepts of neurons.
         """
-        inv_tau_ref = npext.castDecimal(1) / self.tau_ref if self.tau_ref > 0 else np.inf
+        inv_tau_ref = 1. / self.tau_ref if self.tau_ref > 0 else np.inf
         if (max_rates > inv_tau_ref).any():
             raise ValueError(
                 "Max rates must be below the inverse refractory period (%0.3f)"
                 % (inv_tau_ref))
-        print('self.tau')
-        print(self.tau_ref)
-        x = 1 / (1 - np.exp(
-            (self.tau_ref - (1 / max_rates)) / self.tau_rc))
-        gain = (1 - x) / (intercepts - 1)
+
+        x = 1.0 / (1 - np.exp(
+            (self.tau_ref - (1.0 / max_rates)) / self.tau_rc))
+        gain = (1 - x) / (intercepts - 1.0)
         bias = 1 - gain * intercepts
         return gain, bias
 
@@ -216,9 +214,8 @@ class LIFRate(NeuronType):
         """Compute rates in Hz for input current (incl. bias)"""
         j = J - 1
         output[:] = 0  # faster than output[j <= 0] = 0
-        output[j > 0] = dc.Decimal(1) / (
-            dc.Decimal(self.tau_ref) + dc.Decimal(self.tau_rc) 
-            * np.array([a.ln() for a in ((dc.Decimal(1) / j[j > 0]) + 1) ]))
+        output[j > 0] = 1. / (
+            self.tau_ref + self.tau_rc * np.log1p(1. / j[j > 0]))
         # the above line is designed to throw an error if any j is nan
         # (nan > 0 -> error), and not pass x < -1 to log1p
 
@@ -236,21 +233,11 @@ class LIF(LIFRate):
     def step_math(self, dt, J, spiked, voltage, refractory_time):
 
         # update voltage using accurate exponential integration scheme
-        voltage = npext.castDecimal(voltage)
-        J = npext.castDecimal(J)
-        dt = npext.castDecimal(dt)
-        
-        x=np.exp(-dt / npext.castDecimal(self.tau_rc))-npext.castDecimal(1)
-        
-        y= (J - voltage)
-       
-        dV = -x * y
+        dV = -np.expm1(-dt / self.tau_rc) * (J - voltage)
         voltage += dV
         voltage[voltage < self.min_voltage] = self.min_voltage
 
-        
         # update refractory period assuming no spikes for now
-        refractory_time=npext.castDecimal(refractory_time)
         refractory_time -= dt
 
         # set voltages of neurons still in their refractory period to 0
@@ -376,7 +363,7 @@ class Izhikevich(NeuronType):
         return args
 
     def rates(self, x, gain, bias):
-        J = gain * npext.castDecimal(x) + bias
+        J = gain * x + bias
         voltage = np.zeros_like(J)
         recovery = np.zeros_like(J)
         return settled_firingrate(self.step_math, J, [voltage, recovery],

@@ -2,7 +2,7 @@
 Extra functions to extend the capabilities of Numpy.
 """
 from __future__ import absolute_import
-import decimal as dc
+
 import numpy as np
 
 maxint = np.iinfo(np.int32).max
@@ -83,8 +83,6 @@ def norm(x, axis=None, keepdims=False):
         If True, the reduced axes are left in the result. See `np.sum` in
         newer versions of Numpy (>= 1.7).
     """
-
-    
     y = np.sqrt(np.sum(x**2, axis=axis))
     return np.expand_dims(y, axis=axis) if keepdims else y
 
@@ -136,22 +134,3 @@ if hasattr(np.fft, 'rfftfreq'):
 else:
     def rfftfreq(n, d=1.0):
         return np.abs(np.fft.fftfreq(n=n, d=d)[:n // 2 + 1])
-    
-def castDecimal(x):
-    
-  
-    if isinstance(x, np.ndarray):
-        if len(x.shape) == 1:
-            x = np.array([dc.Decimal(p) for p in x])
-        elif len(x.shape) == 2:
-            x = np.array([[dc.Decimal(p) for p in y] for y in x])
-        elif len(x.shape) == 0:
-            x = np.array(dc.Decimal(float(x)))
-    elif isinstance(x, list):
-        x = [dc.Decimal(p) for p in x]
-    else:
-        x = dc.Decimal(x)
-        
-    #print('casted', x)
-        
-    return x

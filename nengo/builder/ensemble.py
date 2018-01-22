@@ -2,7 +2,6 @@ import collections
 import warnings
 
 import numpy as np
-import decimal as dc
 
 import nengo.utils.numpy as npext
 from nengo.builder.builder import Builder
@@ -53,7 +52,7 @@ def build_ensemble(model, ens):
 
     # Set up signal
     model.sig[ens]['in'] = model.Signal(
-        npext.castDecimal(np.zeros(ens.dimensions)), name="%s.signal" % ens)
+        np.zeros(ens.dimensions), name="%s.signal" % ens)
     model.add_op(Reset(model.sig[ens]['in']))
 
     # Set up encoders
@@ -64,9 +63,8 @@ def build_ensemble(model, ens):
         encoders = np.asarray(encoders, dtype=dtype)
     else:
         encoders = npext.array(ens.encoders, min_dims=2, dtype=dtype)
-    encoders = np.array([[dc.Decimal(p) for p in row] for row in encoders])
     encoders /= npext.norm(encoders, axis=1, keepdims=True)
- 
+
     # Determine max_rates and intercepts
     max_rates = sample(ens.max_rates, ens.n_neurons, rng=rng)
     intercepts = sample(ens.intercepts, ens.n_neurons, rng=rng)
@@ -82,18 +80,17 @@ def build_ensemble(model, ens):
                                   "implemented yet." % ens)
     else:
         gain, bias = ens.neuron_type.gain_bias(max_rates, intercepts)
-    gain = np.array([dc.Decimal(p) for p in gain])
-    bias = np.array([dc.Decimal(p) for p in bias])
+
     if isinstance(ens.neuron_type, Direct):
         model.sig[ens.neurons]['in'] = model.Signal(
-            npext.castDecimal(np.zeros(ens.dimensions)), name='%s.neuron_in' % ens)
+            np.zeros(ens.dimensions), name='%s.neuron_in' % ens)
         model.sig[ens.neurons]['out'] = model.sig[ens.neurons]['in']
         model.add_op(Reset(model.sig[ens.neurons]['in']))
     else:
         model.sig[ens.neurons]['in'] = model.Signal(
-            npext.castDecimal(np.zeros(ens.n_neurons)), name="%s.neuron_in" % ens)
+            np.zeros(ens.n_neurons), name="%s.neuron_in" % ens)
         model.sig[ens.neurons]['out'] = model.Signal(
-            npext.castDecimal(np.zeros(ens.n_neurons)), name="%s.neuron_out" % ens)
+            np.zeros(ens.n_neurons), name="%s.neuron_out" % ens)
         model.add_op(Copy(src=model.Signal(bias, name="%s.bias" % ens),
                           dst=model.sig[ens.neurons]['in']))
         # This adds the neuron's operator and sets other signals
@@ -103,7 +100,7 @@ def build_ensemble(model, ens):
     if isinstance(ens.neuron_type, Direct):
         scaled_encoders = encoders
     else:
-        scaled_encoders = encoders * (gain / dc.Decimal(ens.radius))[:, np.newaxis]
+        scaled_encoders = encoders * (gain / ens.radius)[:, np.newaxis]
 
     model.sig[ens]['encoders'] = model.Signal(
         scaled_encoders, name="%s.scaled_encoders" % ens)

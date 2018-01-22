@@ -4,7 +4,7 @@ from nengo.neurons import LIF, NeuronTypeParam, Direct
 from nengo.params import (
     Default, DistributionParam, IntParam, NumberParam,
     StochasticProcessParam, StringParam)
-import decimal as dc
+
 
 class Ensemble(NengoObject):
     """A group of neurons that collectively represent a vector.
@@ -50,7 +50,7 @@ class Ensemble(NengoObject):
 
     n_neurons = IntParam(default=None, low=1)
     dimensions = IntParam(default=None, low=1)
-    radius = NumberParam(default=1, low=1e-10)
+    radius = NumberParam(default=1.0, low=1e-10)
     neuron_type = NeuronTypeParam(default=LIF())
     encoders = DistributionParam(default=UniformHypersphere(surface=True),
                                  sample_shape=('n_neurons', 'dimensions'))

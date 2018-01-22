@@ -41,7 +41,6 @@ class Model(object):
         return Builder.build(self, *objs)
 
     def add_op(self, op):
-#        print(op)
         self.operators.append(op)
         # Fail fast by trying make_step with a temporary sigdict
         signals = SignalDict(__time__=np.asarray(0.0, dtype=self.dtype))

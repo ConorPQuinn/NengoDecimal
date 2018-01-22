@@ -33,7 +33,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 """
 
 import numpy as np
-import decimal as dc
+
 import nengo.utils.numpy as npext
 
 
@@ -206,9 +206,6 @@ class ElementwiseInc(Operator):
     """Increment signal Y by A * X (with broadcasting)"""
 
     def __init__(self, A, X, Y, tag=None):
-#        print('A X Y', A, X, Y)
-#        print('Y',Y)
-#        print('end y')
         self.A = A
         self.X = X
         self.Y = Y
@@ -224,7 +221,6 @@ class ElementwiseInc(Operator):
             str(self.A), str(self.X), str(self.Y), self.tag)
 
     def make_step(self, signals, dt, rng):
-        print(self.A)
         A = signals[self.A]
         X = signals[self.X]
         Y = signals[self.Y]
@@ -241,17 +237,7 @@ class ElementwiseInc(Operator):
                                  (Yshape, Ashape, Xshape))
 
         def step():
-#            print(Y[...])
-#            print('a: ')
-#            print(type(A))
-#            print(A)
-#            print('X: ')
-#            print(type(X))
-#            print(X)
-            
-            
-            Z= A * X 
-            Y[...] = npext.castDecimal(Y[...]) +  Z
+            Y[...] += A * X
         return step
 
 
@@ -280,7 +266,6 @@ def reshape_dot(A, X, Y, tag=None):
             tag, A.shape, X.shape, Y.shape))
 
     # Reshape to handle case when np.dot(A, X) and Y are both scalars
-    X=np.array([dc.Decimal(p) for p in X])
     return (np.dot(A, X)).size == Y.size == 1
 
 
@@ -319,10 +304,10 @@ class DotInc(Operator):
         reshape = reshape_dot(A, X, Y, self.tag)
 
         def step():
-            inc = np.dot(A, npext.castDecimal(X))
+            inc = np.dot(A, X)
             if reshape:
                 inc = np.asarray(inc).reshape(Y.shape)
-            Y[...] = inc + npext.castDecimal(Y[...])
+            Y[...] += inc
         return step
 
 

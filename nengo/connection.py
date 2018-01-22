@@ -220,7 +220,7 @@ class Connection(NengoObject):
     pre = NengoObjectParam(nonzero_size_out=True)
     post = NengoObjectParam(nonzero_size_in=True)
     synapse = SynapseParam(default=Lowpass(0.005))
-    transform = TransformParam(default=np.array(1))
+    transform = TransformParam(default=np.array(1.0))
     solver = ConnectionSolverParam(default=LstsqL2())
     function_info = ConnectionFunctionParam(default=None, optional=True)
     modulatory = BoolParam(default=False)

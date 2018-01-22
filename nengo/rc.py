@@ -27,16 +27,14 @@ import logging
 
 import nengo.utils.paths
 from nengo.utils.compat import configparser
-import numpy as np
-import decimal
+
 logger = logging.getLogger(__name__)
 
 # The default core Nengo RC settings. Access with
 #   nengo.RC_DEFAULTS[section_name][option_name]
-decimal.DefaultContext.prec = 28
 RC_DEFAULTS = {
     'precision': {
-        'dtype': np.dtype(decimal.Decimal),
+        'dtype': 'float64',
     },
     'decoder_cache': {
         'enabled': True,

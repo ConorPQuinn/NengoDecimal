@@ -1,7 +1,6 @@
 import collections
 import functools
 
-import nengo.utils.numpy as npext
 import numpy as np
 
 from nengo.params import Parameter
@@ -48,13 +47,6 @@ class LinearFilter(Synapse):
 
     @staticmethod
     def simple_step(signal, output, a, b):
-#        print('a: ', type(a))
-#        print('b: ', type(b))
-#        print('output: ', output)
-#
-#        print('signal: ', signal)
-        a = npext.castDecimal(a)
-        b = npext.castDecimal(b)
         output *= -a
         output += b * signal
 
