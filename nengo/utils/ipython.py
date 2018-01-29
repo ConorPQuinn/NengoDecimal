@@ -31,11 +31,10 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 from __future__ import absolute_import
 
+import io
 import os
 import platform
-import sys
 import time
-import unicodedata
 import uuid
 
 import numpy as np
@@ -43,9 +42,14 @@ import numpy as np
 try:
     import IPython
     from IPython import get_ipython
-    from IPython.config import Config
     from IPython.display import HTML
-    from IPython.nbconvert import HTMLExporter, PythonExporter
+
+    if IPython.version_info[0] <= 3:
+        from IPython.config import Config
+        from IPython.nbconvert import HTMLExporter, PythonExporter
+    else:
+        from traitlets.config import Config
+        from nbconvert import HTMLExporter, PythonExporter
 
     # nbformat.current deprecated in IPython 3.0
     if IPython.version_info[0] <= 2:
@@ -56,9 +60,14 @@ try:
         def read_nb(fp):
             return current.read(fp, 'json')
     else:
-        from IPython import nbformat
-        from IPython.nbformat import write as write_nb
-        from IPython.nbformat import NotebookNode
+        if IPython.version_info[0] == 3:
+            from IPython import nbformat
+            from IPython.nbformat import write as write_nb
+            from IPython.nbformat import NotebookNode
+        else:
+            import nbformat
+            from nbformat import write as write_nb
+            from nbformat import NotebookNode
 
         def read_nb(fp):
             # Have to load as version 4 or running notebook fails
@@ -66,31 +75,7 @@ try:
 except ImportError:
     def get_ipython():
         return None
-
-
-def in_ipynb():
-    """Determines if code is executed in an IPython notebook.
-
-    Returns
-    -------
-    bool
-       ``True`` if the code is executed in an IPython notebook, otherwise
-       ``False``.
-
-    Notes
-    -----
-    It is possible to connect to a kernel started from an IPython notebook
-    from outside of the notebook. Thus, this function might return ``True``
-    even though the code is not running in an IPython notebook.
-    """
-    if get_ipython() is not None:
-        cfg = get_ipython().config
-        app_key = 'IPKernelApp'
-        if 'parent_appname' not in cfg[app_key]:
-            app_key = 'KernelApp'  # was used by old IPython versions
-        if cfg[app_key].get('parent_appname') == 'ipython-notebook':
-            return True
-    return False
+assert get_ipython
 
 
 def has_ipynb_widgets():
@@ -102,10 +87,14 @@ def has_ipynb_widgets():
         ``True`` if IPython widgets are available, otherwise ``False``.
     """
     try:
-        import IPython.html.widgets
-        import IPython.utils.traitlets
-        assert IPython.html.widgets
-        assert IPython.utils.traitlets
+        if IPython.version_info[0] <= 3:
+            from IPython.html import widgets as ipywidgets
+            from IPython.utils import traitlets
+        else:
+            import ipywidgets
+            import traitlets
+        assert ipywidgets
+        assert traitlets
     except ImportError:
         return False
     else:
@@ -113,7 +102,7 @@ def has_ipynb_widgets():
 
 
 def hide_input():
-    """Hide the input of the IPython notebook input block this is executed in.
+    """Hide the input of the Jupyter notebook input block this is executed in.
 
     Returns a link to toggle the visibility of the input block.
     """
@@ -175,7 +164,7 @@ def hide_input():
 
 
 def load_notebook(nb_path):
-    with open(nb_path) as f:
+    with io.open(nb_path, 'r', encoding='utf-8') as f:
         nb = read_nb(f)
     return nb
 
@@ -187,13 +176,18 @@ def export_py(nb, dest_path=None):
     """
     exporter = PythonExporter()
     body, resources = exporter.from_notebook_node(nb)
-    if sys.version_info[0] == 2:
-        body = unicodedata.normalize('NFKD', body).encode('ascii', 'ignore')
-    # We'll remove %matplotlib inline magic, but leave the rest
-    body = body.replace("get_ipython().magic(u'matplotlib inline')\n", "")
-    body = body.replace("get_ipython().magic('matplotlib inline')\n", "")
+
+    # Remove all lines with get_ipython
+    while u"get_ipython()" in body:
+        ind0 = body.find(u"get_ipython()")
+        ind1 = body.find(u"\n", ind0)
+        body = body[:ind0] + body[(ind1 + 1):]
+
+    if u"plt" in body:
+        body += u"\nplt.show()\n"
+
     if dest_path is not None:
-        with open(dest_path, 'w') as f:
+        with io.open(dest_path, 'w', encoding='utf-8') as f:
             f.write(body)
     return body
 
@@ -242,7 +236,7 @@ def export_html(nb, dest_path=None, image_dir=None, image_rel_dir=None):
         html_out = export_images(resources, image_dir, image_rel_dir, html_out)
 
     if dest_path is not None:
-        with open(dest_path, 'w') as f:
+        with io.open(dest_path, 'w', encoding='utf-8') as f:
             f.write(html_out)
     return html_out
 
@@ -269,8 +263,11 @@ def export_evaluated(nb, dest_path=None, skip_exceptions=False):
     nb_runner.run_notebook(skip_exceptions=skip_exceptions)
 
     if dest_path is not None:
-        with open(dest_path, 'w') as f:
-            write_nb(nb_runner.nb, f)
+        with io.open(dest_path, 'w', encoding='utf-8') as f:
+            if IPython.version_info[0] <= 2:
+                write_nb(nb_runner.nb, f, 'ipynb')
+            else:
+                write_nb(nb_runner.nb, f)
     return nb_runner.nb
 
 
@@ -351,7 +348,8 @@ class NotebookRunner(object):
                 cell['prompt_number'] = content['execution_count']
                 out.prompt_number = content['execution_count']
 
-            if msg_type in ('status', 'pyin', 'execute_input'):
+            if msg_type in ('status', 'pyin', 'execute_input',
+                            'comm_open', 'comm_msg'):
                 continue
             elif msg_type == 'stream':
                 out.stream = content['name']
@@ -363,6 +361,8 @@ class NotebookRunner(object):
                     except KeyError:
                         raise NotImplementedError(
                             'unhandled mime type: %s' % mime)
+                    if "widgets/js/widget" in data:
+                        continue
                     setattr(out, attr, data)
             elif msg_type == 'pyerr':
                 out.ename = content['ename']
@@ -396,7 +396,7 @@ class NotebookRunner(object):
         for i, cell in enumerate(self.iter_code_cells()):
             try:
                 self.run_cell(cell)
-            except:
+            except Exception:
                 if not skip_exceptions:
                     raise
             if progress_callback is not None:

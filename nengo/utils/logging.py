@@ -3,7 +3,7 @@ from __future__ import absolute_import
 import logging
 import sys
 
-from nengo.utils.compat import TextIO
+from .compat import TextIO
 
 console_formatter = logging.Formatter('[%(levelname)s] %(message)s')
 file_formatter = logging.Formatter(
@@ -13,7 +13,7 @@ console_handler = logging.StreamHandler(sys.stdout)
 console_handler.setFormatter(console_formatter)
 
 
-def log(debug=False, path=None):
+def log(level='warning', path=None):
     """Log messages.
 
     If path is None, logging messages will be printed to the console (stdout).
@@ -23,8 +23,25 @@ def log(debug=False, path=None):
     logging things, and Nengo will just populate their log.
     However, if the user is using Nengo directly, they can use this
     function to get log output.
+
+    Parameters
+    ----------
+    level : string (optional)
+        Collect messages targeting this level and above. The levels from
+        highest to lowest are: 'CRITICAL', 'ERROR', 'WARNING', 'INFO', 'DEBUG'.
+    path : string (optional)
+        Path of a file to append log messages to. If ``None`` (default),
+        messages are logged to the console.
+
+    Returns
+    -------
+    logging handler
+        The logging handler setup by this function.
     """
-    level = logging.DEBUG if debug else logging.WARNING
+    if level.upper() not in ('CRITICAL', 'ERROR', 'WARNING', 'INFO', 'DEBUG'):
+        raise ValueError("Invalid logging level")
+
+    level = getattr(logging, level.upper())
     logging.root.setLevel(level)
 
     if path is None:
@@ -42,11 +59,8 @@ def log(debug=False, path=None):
     if handler not in logging.root.handlers:
         logging.root.addHandler(handler)
     handler.setLevel(level)
-    try:
-        logging.captureWarnings(True)
-    except AttributeError:
-        # logging.captureWarnings doesn't exist in Python 2.6; ignore it
-        pass
+    logging.captureWarnings(True)
+    return handler
 
 
 class CaptureLogHandler(logging.StreamHandler):

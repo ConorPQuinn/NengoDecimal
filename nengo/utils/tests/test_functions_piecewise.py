@@ -1,9 +1,11 @@
 import numpy as np
 import pytest
 
+from nengo.exceptions import ValidationError
 from nengo.utils.functions import piecewise
 
 
+@pytest.mark.filterwarnings('ignore::DeprecationWarning')
 def test_basic():
     f = piecewise({0.5: 1, 1.0: 0})
     assert np.allclose(f(-10), [0])
@@ -16,6 +18,7 @@ def test_basic():
     assert np.allclose(f(100), [0])
 
 
+@pytest.mark.filterwarnings('ignore::DeprecationWarning')
 def test_lists():
     f = piecewise({0.5: [1, 0], 1.0: [0, 1]})
     assert np.allclose(f(-10), [0, 0])
@@ -28,24 +31,28 @@ def test_lists():
     assert np.allclose(f(100), [0, 1])
 
 
+@pytest.mark.filterwarnings('ignore::DeprecationWarning')
 def test_invalid_key():
-    with pytest.raises(TypeError):
+    with pytest.raises(ValidationError):
         f = piecewise({0.5: 1, 1: 0, 'a': 0.2})
         assert f
 
 
+@pytest.mark.filterwarnings('ignore::DeprecationWarning')
 def test_invalid_length():
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         f = piecewise({0.5: [1, 0], 1.0: [1, 0, 0]})
         assert f
 
 
+@pytest.mark.filterwarnings('ignore::DeprecationWarning')
 def test_invalid_function_length():
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         f = piecewise({0.5: 0, 1.0: lambda t: [t, t ** 2]})
         assert f
 
 
+@pytest.mark.filterwarnings('ignore::DeprecationWarning')
 def test_function():
     f = piecewise({0: np.sin, 0.5: np.cos})
     assert np.allclose(f(0), [np.sin(0)])
@@ -56,6 +63,7 @@ def test_function():
     assert np.allclose(f(1.0), [np.cos(1.0)])
 
 
+@pytest.mark.filterwarnings('ignore::DeprecationWarning')
 def test_function_list():
 
     def func1(t):

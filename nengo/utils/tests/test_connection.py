@@ -1,13 +1,16 @@
 import numpy as np
 import pytest
+from matplotlib.mlab import griddata
 
 import nengo
 from nengo.dists import UniformHypersphere
-from nengo.utils.connection import target_function
+from nengo.utils.connection import target_function, eval_point_decoding
+from nengo.utils.numpy import rms
 
 
 @pytest.mark.parametrize("dimensions", [1, 4])
 @pytest.mark.parametrize("radius", [1, 2.0])
+@pytest.mark.filterwarnings("ignore:'targets' can be passed directly")
 def test_target_function(Simulator, nl_nodirect, plt, dimensions, radius,
                          seed, rng):
     eval_points = UniformHypersphere().sample(1000, dimensions, rng=rng)
@@ -31,8 +34,8 @@ def test_target_function(Simulator, nl_nodirect, plt, dimensions, radius,
         probe1 = nengo.Probe(n1, synapse=0.03)
         probe2 = nengo.Probe(n2, synapse=0.03)
 
-    sim = Simulator(model)
-    sim.run(0.5)
+    with Simulator(model) as sim:
+        sim.run(0.5)
 
     plt.subplot(2, 1, 1)
     plt.plot(sim.trange(), sim.data[probe1])
@@ -42,3 +45,37 @@ def test_target_function(Simulator, nl_nodirect, plt, dimensions, radius,
     plt.title('Square by passing in function to connection')
 
     assert np.allclose(sim.data[probe1], sim.data[probe2], atol=0.2 * radius)
+
+
+def test_eval_point_decoding(Simulator, nl_nodirect, plt, seed):
+    with nengo.Network(seed=seed) as model:
+        model.config[nengo.Ensemble].neuron_type = nl_nodirect()
+        a = nengo.Ensemble(200, 2)
+        b = nengo.Ensemble(100, 1)
+        c = nengo.Connection(a, b, function=lambda x: x[0] * x[1])
+
+    with Simulator(model) as sim:
+        eval_points, targets, decoded = eval_point_decoding(c, sim)
+
+    def contour(xy, z):
+        xi = np.linspace(-1, 1, 101)
+        yi = np.linspace(-1, 1, 101)
+        zi = griddata(xy[:, 0], xy[:, 1], z.ravel(), xi, yi, interp='linear')
+        plt.contourf(xi, yi, zi, cmap=plt.cm.seismic)
+        plt.colorbar()
+
+    plt.figure(figsize=(15, 5))
+    plt.subplot(131)
+    contour(eval_points, targets)
+    plt.title("Target (desired decoding)")
+    plt.subplot(132)
+    plt.title("Actual decoding")
+    contour(eval_points, decoded)
+    plt.subplot(133)
+    plt.title("Difference between actual and desired")
+    contour(eval_points, decoded - targets)
+
+    # Generous error check, just to make sure it's in the right ballpark.
+    # Also make sure error is above zero, i.e. y != z
+    error = rms(decoded - targets, axis=1).mean()
+    assert error < 0.1 and error > 1e-8

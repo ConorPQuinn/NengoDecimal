@@ -1,5 +1,5 @@
 import nengo
-from nengo.utils.functions import piecewise
+from nengo.processes import Piecewise
 from nengo.utils.numpy import rmse
 
 
@@ -7,7 +7,7 @@ def test_integrator(Simulator, plt, seed):
     model = nengo.Network(seed=seed)
     with model:
         inputs = {0: 0, 0.2: 1, 1: 0, 2: -2, 3: 0, 4: 1, 5: 0}
-        input = nengo.Node(piecewise(inputs))
+        input = nengo.Node(Piecewise(inputs))
 
         tau = 0.1
         T = nengo.networks.Integrator(tau, n_neurons=100, dimensions=1)
@@ -21,8 +21,8 @@ def test_integrator(Simulator, plt, seed):
         A_p = nengo.Probe(A, synapse=0.01, sample_every=0.01)
         T_p = nengo.Probe(T.ensemble, synapse=0.01, sample_every=0.01)
 
-    sim = Simulator(model)
-    sim.run(6.0)
+    with Simulator(model) as sim:
+        sim.run(6.0)
 
     t = sim.trange(dt=0.01)
     plt.plot(t, sim.data[A_p], label='Manual')

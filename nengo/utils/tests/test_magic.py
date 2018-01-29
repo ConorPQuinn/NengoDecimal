@@ -1,6 +1,7 @@
 import inspect
 
-from nengo.utils.magic import decorator, memoize
+from nengo.utils.compat import getfullargspec
+from nengo.utils.magic import decorator
 
 state = None  # Used to make sure decorators are running
 
@@ -36,7 +37,7 @@ def test_function():
     _test_decorated(f)
 
     # Make sure introspection works
-    assert inspect.getargspec(f).args == ['a', 'b']
+    assert getfullargspec(f).args == ['a', 'b']
     assert inspect.getsource(f) == ('    @test_decorator\n'
                                     '    def f(a, b):\n'
                                     '        """Return 1."""\n'
@@ -50,7 +51,7 @@ def test_boundfunction():
         global state
         state = 'run'
         assert instance is not None
-        assert instance.__class__.__name__ == 'Test'
+        assert type(instance).__name__ == 'Test'
         return wrapped(*args, **kwargs)
 
     class Test(object):
@@ -63,7 +64,7 @@ def test_boundfunction():
     _test_decorated(inst.f)
 
     # Make sure introspection works
-    assert inspect.getargspec(inst.f).args == ['self', 'a', 'b']
+    assert getfullargspec(inst.f).args == ['self', 'a', 'b']
     assert inspect.getsource(inst.f) == ('        @test_decorator\n'
                                          '        def f(self, a, b):\n'
                                          '            """Return 1."""\n'
@@ -80,19 +81,19 @@ def test_staticmethod():
         return wrapped(*args, **kwargs)
 
     # --- Decorator before staticmethod
-    class Test(object):
+    class TestBeforeStaticmethod(object):
         @test_decorator
         @staticmethod
         def f(a, b):
             """Return 1."""
             return 1
 
-    _test_decorated(Test.f)
-    inst = Test()
+    _test_decorated(TestBeforeStaticmethod.f)
+    inst = TestBeforeStaticmethod()
     _test_decorated(inst.f)
 
     # Make sure introspection works
-    assert inspect.getargspec(inst.f).args == ['a', 'b']
+    assert getfullargspec(inst.f).args == ['a', 'b']
     assert inspect.getsource(inst.f) == ('        @test_decorator\n'
                                          '        @staticmethod\n'
                                          '        def f(a, b):\n'
@@ -100,19 +101,19 @@ def test_staticmethod():
                                          '            return 1\n')
 
     # --- Decorator after staticmethod
-    class Test(object):
+    class TestAfterStaticmethod(object):
         @staticmethod
         @test_decorator
         def f(a, b):
             """Return 1."""
             return 1
 
-    _test_decorated(Test.f)
-    inst = Test()
+    _test_decorated(TestAfterStaticmethod.f)
+    inst = TestAfterStaticmethod()
     _test_decorated(inst.f)
 
     # Make sure introspection works
-    assert inspect.getargspec(inst.f).args == ['a', 'b']
+    assert getfullargspec(inst.f).args == ['a', 'b']
     assert inspect.getsource(inst.f) == ('        @staticmethod\n'
                                          '        @test_decorator\n'
                                          '        def f(a, b):\n'
@@ -126,24 +127,25 @@ def test_classmethod():
     def test_decorator(wrapped, instance, args, kwargs):
         global state
         state = 'run'
-        assert (instance is None and args[0].__name__ == 'Test'
-                or instance.__name__ == 'Test')
+        valid_names = {'TestBeforeStaticmethod', 'TestAfterStaticmethod'}
+        assert (instance is None and args[0].__name__ in valid_names
+                or instance.__name__ in valid_names)
         return wrapped(*args, **kwargs)
 
     # --- Decorator before classmethod
-    class Test(object):
+    class TestBeforeStaticmethod(object):
         @test_decorator
         @classmethod
         def f(cls, a, b):
             """Return 1."""
             return 1
 
-    _test_decorated(Test.f)
-    inst = Test()
+    _test_decorated(TestBeforeStaticmethod.f)
+    inst = TestBeforeStaticmethod()
     _test_decorated(inst.f)
 
     # Make sure introspection works
-    assert inspect.getargspec(inst.f).args == ['cls', 'a', 'b']
+    assert getfullargspec(inst.f).args == ['cls', 'a', 'b']
     assert inspect.getsource(inst.f) == ('        @test_decorator\n'
                                          '        @classmethod\n'
                                          '        def f(cls, a, b):\n'
@@ -151,19 +153,19 @@ def test_classmethod():
                                          '            return 1\n')
 
     # --- Decorator after staticmethod
-    class Test(object):
+    class TestAfterStaticmethod(object):
         @classmethod
         @test_decorator
         def f(cls, a, b):
             """Return 1."""
             return 1
 
-    _test_decorated(Test.f)
-    inst = Test()
+    _test_decorated(TestAfterStaticmethod.f)
+    inst = TestAfterStaticmethod()
     _test_decorated(inst.f)
 
     # Make sure introspection works
-    assert inspect.getargspec(inst.f).args == ['cls', 'a', 'b']
+    assert getfullargspec(inst.f).args == ['cls', 'a', 'b']
     assert inspect.getsource(inst.f) == ('        @classmethod\n'
                                          '        @test_decorator\n'
                                          '        def f(cls, a, b):\n'
@@ -193,7 +195,7 @@ def test_class():
     inst = f('a', 'b')
     assert inst.a == 'a' and inst.b == 'b'
     assert inst.ran
-    assert inst.__class__ == f.__wrapped__
+    assert type(inst) == f.__wrapped__
     assert type(inst) == f.__wrapped__
 
     # Make sure introspection works
@@ -203,62 +205,3 @@ def test_class():
                                     '        def __init__(self, a, b):\n'
                                     '            self.a = a\n'
                                     '            self.b = b\n')
-
-
-def test_memoize():  # noqa: C901
-    """Test that the memoize decorator works in several contexts."""
-
-    @memoize
-    def f():
-        return 'f'
-
-    @memoize
-    def f_args(a, b=5):
-        return a + b
-
-    class Test(object):
-        @memoize
-        def inst_f(self):
-            return 'inst_f'
-
-        @memoize
-        @classmethod
-        def cls_f(cls):
-            return 'cls_f'
-
-        @memoize
-        @staticmethod
-        def static_f():
-            return 'static_f'
-
-        @property
-        @memoize
-        def prop(self):
-            return 'prop'
-
-    def check_all(inst, hits, misses):
-        # Check return values
-        assert f() == f.__name__
-        assert inst.inst_f() == inst.inst_f.__name__
-        assert Test.cls_f() == Test.cls_f.__name__
-        assert Test.static_f() == Test.static_f.__name__
-        assert inst.prop == 'prop'
-        assert f_args(1) == 6
-        assert f_args(a=10) == 15
-        assert f_args(1, 2) == 3
-        assert f_args(1, b=100) == 101
-
-        # Check hits and misses
-        for func in f, inst.inst_f, Test.cls_f, Test.static_f, Test.prop.fget:
-            assert func.wrapper.hits == hits
-            assert func.wrapper.misses == misses
-        assert f_args.wrapper.hits == 4 * hits
-        assert f_args.wrapper.misses == 4 * misses
-
-    inst = Test()
-
-    # First run should be all misses
-    check_all(inst, 0, 1)
-
-    # Second run should be all hits
-    check_all(inst, 1, 1)

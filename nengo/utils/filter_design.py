@@ -142,10 +142,6 @@ def normalize(b, a):
         a = a[1:]
     outb = b * (1.0) / a[0]
     outa = a * (1.0) / a[0]
-    
-    def allclose(a, b, atol):
-        return all(abs(a-b)<=(atol))
-    
     if allclose(0, outb[:, 0], atol=1e-14):
         warnings.warn("Badly conditioned filter coefficients (numerator): the "
                       "results may be meaningless", BadCoefficients)
@@ -437,7 +433,7 @@ def cont2discrete(sys, dt, method="zoh", alpha=None):  # noqa: C901
 
     References
     ----------
-    .. [1] http://en.wikipedia.org/wiki/
+    .. [1] https://en.wikipedia.org/wiki/
                Discretization#Discretization_of_linear_state_space_models
 
     .. [2] http://techteach.no/publications/

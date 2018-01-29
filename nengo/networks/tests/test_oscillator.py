@@ -1,5 +1,5 @@
 import nengo
-from nengo.utils.functions import piecewise
+from nengo.processes import Piecewise
 from nengo.utils.numpy import rmse
 
 
@@ -7,7 +7,7 @@ def test_oscillator(Simulator, plt, seed):
     model = nengo.Network(seed=seed)
     with model:
         inputs = {0: [1, 0], 0.5: [0, 0]}
-        input = nengo.Node(piecewise(inputs), label='Input')
+        input = nengo.Node(Piecewise(inputs), label='Input')
 
         tau = 0.1
         freq = 5
@@ -23,8 +23,8 @@ def test_oscillator(Simulator, plt, seed):
         A_probe = nengo.Probe(A, synapse=0.01, sample_every=0.01)
         T_probe = nengo.Probe(T.ensemble, synapse=0.01, sample_every=0.01)
 
-    sim = Simulator(model)
-    sim.run(3.0)
+    with Simulator(model) as sim:
+        sim.run(3.0)
 
     t = sim.trange(dt=0.01)
     plt.plot(t, sim.data[A_probe], label='Manual')

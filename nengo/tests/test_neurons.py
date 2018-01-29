@@ -2,8 +2,10 @@ import numpy as np
 import pytest
 
 import nengo
-from nengo.neurons import NeuronTypeParam
-from nengo.processes import WhiteNoise
+
+from nengo.exceptions import BuildError, SimulationError
+from nengo.neurons import Direct, NeuronTypeParam
+from nengo.processes import WhiteSignal
 from nengo.solvers import LstsqL2nz
 from nengo.utils.ensemble import tuning_curves
 from nengo.utils.matplotlib import implot, rasterplot
@@ -36,9 +38,9 @@ def test_lif_builtin(rng):
     assert np.allclose(sim_rates, math_rates, atol=1, rtol=0.02)
 
 
-def test_lif(Simulator, plt, rng, logger):
-    """Test that the dynamic model approximately matches the rates"""
-    dt = 0.001
+@pytest.mark.parametrize('dt', (0.001, 0.002))
+def test_lif(Simulator, plt, rng, logger, dt):
+    """Test that the dynamic model approximately matches the rates."""
     n = 5000
     x = 0.5
     encoders = np.ones((n, 1))
@@ -51,15 +53,15 @@ def test_lif(Simulator, plt, rng, logger):
         ens = nengo.Ensemble(
             n, dimensions=1, neuron_type=nengo.LIF(),
             encoders=encoders, max_rates=max_rates, intercepts=intercepts)
-        nengo.Connection(ins, ens.neurons, transform=np.ones((n, 1)))
+        nengo.Connection(
+            ins, ens.neurons, transform=np.ones((n, 1)), synapse=None)
         spike_probe = nengo.Probe(ens.neurons)
         voltage_probe = nengo.Probe(ens.neurons, 'voltage')
         ref_probe = nengo.Probe(ens.neurons, 'refractory_time')
 
-    sim = Simulator(m, dt=dt)
-
     t_final = 1.0
-    sim.run(t_final)
+    with Simulator(m, dt=dt) as sim:
+        sim.run(t_final)
 
     i = 3
     plt.subplot(311)
@@ -86,6 +88,11 @@ def test_lif(Simulator, plt, rng, logger):
     assert np.abs(np.diff(sim.data[voltage_probe])).sum() > 1
     assert np.abs(np.diff(sim.data[ref_probe])).sum() > 1
 
+    # compute spike counts after each timestep
+    actual_counts = (spikes > 0).cumsum(axis=0)
+    expected_counts = np.outer(sim.trange(), math_rates)
+    assert (abs(actual_counts - expected_counts) < 1).all()
+
 
 @pytest.mark.parametrize('min_voltage', [-np.inf, -1, 0])
 def test_lif_min_voltage(Simulator, plt, min_voltage, seed):
@@ -98,8 +105,8 @@ def test_lif_min_voltage(Simulator, plt, min_voltage, seed):
         p_val = nengo.Probe(ens, synapse=0.01)
         p_voltage = nengo.Probe(ens.neurons, 'voltage')
 
-    sim = Simulator(model)
-    sim.run(0.5)
+    with Simulator(model) as sim:
+        sim.run(0.5)
 
     plt.subplot(2, 1, 1)
     plt.plot(sim.trange(), sim.data[p_val])
@@ -125,9 +132,9 @@ def test_lif_zero_tau_ref(Simulator):
                              neuron_type=nengo.LIF(tau_ref=0))
         nengo.Connection(nengo.Node(output=10), ens)
         p = nengo.Probe(ens.neurons)
-    sim = Simulator(m)
-    sim.run(0.02)
-    assert np.all(sim.data[p][1:] == max_rate)
+    with Simulator(m) as sim:
+        sim.run(0.02)
+    assert np.allclose(sim.data[p][1:], max_rate)
 
 
 def test_alif_rate(Simulator, plt):
@@ -149,8 +156,8 @@ def test_alif_rate(Simulator, plt):
         ap = nengo.Probe(a.neurons)
 
     dt = 1e-3
-    sim = Simulator(model, dt=dt)
-    sim.run(2.)
+    with Simulator(model, dt=dt) as sim:
+        sim.run(2.)
 
     t = sim.trange()
     rates = sim.data[ap]
@@ -199,8 +206,8 @@ def test_alif(Simulator, plt):
         bp = nengo.Probe(b.neurons)
 
     dt = 1e-3
-    sim = Simulator(model, dt=dt)
-    sim.run(2.)
+    with Simulator(model, dt=dt) as sim:
+        sim.run(2.)
 
     t = sim.trange()
     a_rates = sim.data[ap]
@@ -231,7 +238,7 @@ def test_izhikevich(Simulator, plt, seed, rng):
     simulated in Nengo (but doesn't test any properties of them).
     """
     with nengo.Network() as m:
-        u = nengo.Node(output=WhiteNoise(0.6, 8).f(d=1, rng=rng))
+        u = nengo.Node(output=WhiteSignal(0.6, high=10), size_out=1)
 
         # Seed the ensembles (not network) so we get the same sort of neurons
         ens_args = {'n_neurons': 4, 'dimensions': 1, 'seed': seed}
@@ -256,8 +263,8 @@ def test_izhikevich(Simulator, plt, seed, rng):
             spikes[ens] = nengo.Probe(ens.neurons)
         up = nengo.Probe(u)
 
-    sim = Simulator(m)
-    sim.run(0.6)
+    with Simulator(m, seed=seed+1) as sim:
+        sim.run(0.6)
     t = sim.trange()
 
     def plot(ens, title, ix):
@@ -278,11 +285,48 @@ def test_izhikevich(Simulator, plt, seed, rng):
     plot(rz, "Resonator", 6)
 
 
+@pytest.mark.parametrize("max_rate,intercept", [(300., 0.0), (100., 1.1)])
+def test_sigmoid_response_curves(Simulator, max_rate, intercept):
+    """Check the sigmoid response curve monotonically increases.
+
+    The sigmoid response curve should work fine:
+
+    - if max rate > rate at inflection point and intercept < 1
+    - if max rate < rate at inflection point and intercept > 1
+    """
+    with nengo.Network() as m:
+        e = nengo.Ensemble(1, 1, neuron_type=nengo.Sigmoid(),
+                           max_rates=[max_rate], intercepts=[intercept])
+
+    with Simulator(m) as sim:
+        pass
+    x, y = nengo.utils.ensemble.response_curves(e, sim)
+    assert np.allclose(np.max(y), max_rate)
+    assert np.all(y > 0.)
+    assert np.all(np.diff(y) > 0.)  # monotonically increasing
+
+
+@pytest.mark.parametrize("max_rate,intercept", [
+    (300., 1.1), (300., 1.0), (100., 0.9), (100, 1.0)])
+@pytest.mark.filterwarnings('ignore:divide by zero')
+def test_sigmoid_invalid(Simulator, max_rate, intercept):
+    """Check that invalid sigmoid ensembles raise an error."""
+    with nengo.Network() as m:
+        nengo.Ensemble(1, 1, neuron_type=nengo.Sigmoid(),
+                       max_rates=[max_rate], intercepts=[intercept])
+    with pytest.raises(BuildError):
+        with Simulator(m):
+            pass
+
+
 def test_dt_dependence(Simulator, nl_nodirect, plt, seed, rng):
     """Neurons should not wildly change with different dt."""
+    freq = 10 * (2 * np.pi)
+    input_signal = lambda t: [np.sin(freq*t), np.cos(freq*t)]
+
     with nengo.Network(seed=seed) as m:
         m.config[nengo.Ensemble].neuron_type = nl_nodirect()
-        u = nengo.Node(output=WhiteNoise(0.1, 5).f(d=2, rng=rng))
+        u = nengo.Node(input_signal, size_out=2)
         pre = nengo.Ensemble(60, dimensions=2)
         square = nengo.Ensemble(60, dimensions=2)
         nengo.Connection(u, pre)
@@ -296,27 +340,71 @@ def test_dt_dependence(Simulator, nl_nodirect, plt, seed, rng):
     out_data = []
     dts = (0.0001, 0.001)
     colors = ('b', 'g', 'r')
+    ax1 = plt.subplot(2, 1, 1)
+    ax2 = plt.subplot(2, 1, 2)
     for c, dt in zip(colors, dts):
-        sim = Simulator(m, dt=dt)
-        sim.run(0.1)
+        with Simulator(m, dt=dt, seed=seed+1) as sim:
+            sim.run(0.1)
         t = sim.trange(dt=0.001)
         activity_data.append(sim.data[activity_p])
         out_data.append(sim.data[out_p])
-        plt.subplot(2, 1, 1)
-        plt.plot(t, sim.data[out_p], c=c)
-        plt.subplot(2, 1, 2)
+        ax1.plot(t, sim.data[out_p], c=c)
         # Just plot 5 neurons
-        plt.plot(t, sim.data[activity_p][..., :5], c=c)
+        ax2.plot(t, sim.data[activity_p][..., :5], c=c)
 
-    plt.subplot(2, 1, 1)
-    plt.xlim(right=t[-1])
-    plt.ylabel("Decoded output")
-    plt.subplot(2, 1, 2)
-    plt.xlim(right=t[-1])
-    plt.ylabel("Neural activity")
+    ax1.set_xlim(right=t[-1])
+    ax1.set_ylabel("Decoded output")
+    ax2.set_xlim(right=t[-1])
+    ax2.set_ylabel("Neural activity")
 
     assert rmse(activity_data[0], activity_data[1]) < ((1. / dt) * 0.01)
     assert np.allclose(out_data[0], out_data[1], atol=0.05)
+
+
+@pytest.mark.parametrize('Neuron', [nengo.LIF, nengo.LIFRate])
+def test_amplitude(Simulator, seed, rng, plt, Neuron):
+    amp = 0.1
+    neuron0 = Neuron()
+    neuron = Neuron(amplitude=amp)
+
+    # check static
+    x = np.linspace(-5, 30)
+    y = amp * neuron0.rates(x, 1., 0.)
+    y2 = neuron.rates(x, 1., 0.)
+    assert np.allclose(y, y2, atol=1e-5)
+
+    # check dynamic
+    n = 100
+    x = 1.0
+    encoders = np.ones((n, 1))
+    max_rates = rng.uniform(low=20, high=200, size=n)
+    intercepts = rng.uniform(low=-1, high=0.8, size=n)
+
+    with nengo.Network(seed=seed) as model:
+        ins = nengo.Node(x)
+        ens = nengo.Ensemble(
+            n, dimensions=1, neuron_type=neuron,
+            encoders=encoders, max_rates=max_rates, intercepts=intercepts)
+        nengo.Connection(ins, ens, synapse=None)
+        spike_probe = nengo.Probe(ens.neurons)
+
+    dt = 0.001
+    t_final = 0.5
+    with Simulator(model, dt=dt) as sim:
+        sim.run(t_final)
+
+    spikes = sim.data[spike_probe]
+    r = spikes.sum(axis=0) * (dt / t_final)
+
+    gain, bias = neuron0.gain_bias(max_rates, intercepts)
+    r0 = amp * neuron0.rates(x, gain, bias)
+
+    i = np.argsort(r0)
+    plt.plot(r0[i])
+    plt.plot(r[i])
+
+    error = rms(r - r0) / rms(r0)
+    assert (error < 0.02).all()
 
 
 def test_reset(Simulator, nl_nodirect, seed, rng):
@@ -324,35 +412,115 @@ def test_reset(Simulator, nl_nodirect, seed, rng):
     m = nengo.Network(seed=seed)
     with m:
         m.config[nengo.Ensemble].neuron_type = nl_nodirect()
-        u = nengo.Node(output=WhiteNoise(0.15, 5).f(d=2, rng=rng))
+        u = nengo.Node(WhiteSignal(0.3, high=10), size_out=2)
         ens = nengo.Ensemble(60, dimensions=2)
         square = nengo.Ensemble(60, dimensions=2)
         nengo.Connection(u, ens)
-        nengo.Connection(ens, square, function=lambda x: x ** 2,
+        nengo.Connection(ens, square, function=lambda x: x**2,
                          solver=LstsqL2nz(weights=True))
-        square_p = nengo.Probe(square, synapse=0.1)
+        square_p = nengo.Probe(square, synapse=0.01)
 
-    sim = Simulator(m)
-    sim.run(0.1)
-    sim.run(0.2)
+    with Simulator(m, seed=seed+1) as sim:
+        sim.run(0.1)
+        sim.run(0.2)
+        t1 = sim.trange()
+        square1 = np.array(sim.data[square_p])
 
-    first_t = sim.trange()
-    first_square_p = np.array(sim.data[square_p], copy=True)
+        sim.reset()
+        sim.run(0.3)
 
-    sim.reset()
-    sim.run(0.3)
-
-    assert np.all(sim.trange() == first_t)
-    assert np.all(sim.data[square_p] == first_square_p)
+    assert np.allclose(sim.trange(), t1)
+    assert np.allclose(sim.data[square_p], square1)
 
 
 def test_neurontypeparam():
     """NeuronTypeParam must be a neuron type."""
     class Test(object):
-        ntp = NeuronTypeParam(default=None)
+        ntp = NeuronTypeParam('ntp', default=None)
 
     inst = Test()
     inst.ntp = nengo.LIF()
     assert isinstance(inst.ntp, nengo.LIF)
     with pytest.raises(ValueError):
         inst.ntp = 'a'
+
+
+def test_frozen():
+    """Test attributes inherited from FrozenObject"""
+    a = nengo.LIF()
+    b = nengo.LIF()
+    c = nengo.LIF(tau_rc=0.3)
+    d = nengo.neurons.Izhikevich()
+
+    assert hash(a) == hash(a)
+    assert hash(b) == hash(b)
+    assert hash(c) == hash(c)
+    assert hash(d) == hash(d)
+
+    assert a == b
+    assert hash(a) == hash(b)
+    assert a != c
+    assert hash(a) != hash(c)  # not guaranteed, but highly likely
+    assert b != c
+    assert hash(b) != hash(c)  # not guaranteed, but highly likely
+    assert a != d
+    assert hash(a) != hash(d)  # not guaranteed, but highly likely
+
+    with pytest.raises(ValueError):
+        a.tau_rc = 0.3
+    with pytest.raises(ValueError):
+        d.coupling = 8
+
+
+@pytest.mark.filterwarnings('ignore:divide by zero')
+def test_direct_mode_nonfinite_value(Simulator):
+    with nengo.Network() as model:
+        e1 = nengo.Ensemble(10, 1, neuron_type=Direct())
+        e2 = nengo.Ensemble(10, 1)
+        nengo.Connection(e1, e2, function=lambda x: 1. / x)
+
+    with Simulator(model) as sim:
+        with pytest.raises(SimulationError):
+            sim.run(0.01)
+
+
+@pytest.mark.parametrize("generic", (True, False))
+def test_gain_bias(rng, nl_nodirect, generic):
+    if nl_nodirect == nengo.Sigmoid and generic:
+        # the generic method doesn't work with sigmoid neurons (because they're
+        # always positive). that's not a failure, because the sigmoid neurons
+        # never need to use the generic method normally, so we'll just skip
+        # it for this test.
+        return
+
+    n = 100
+    max_rates = rng.uniform(300, 400, size=n)
+    intercepts = rng.uniform(-0.5, 0.5, size=n)
+    nl = nl_nodirect()
+    tolerance = 0.1 if generic else 1e-8
+
+    if generic:
+        gain, bias = nengo.neurons.NeuronType.gain_bias(nl, max_rates,
+                                                        intercepts)
+    else:
+        gain, bias = nl.gain_bias(max_rates, intercepts)
+
+    assert np.allclose(nl.rates(np.ones(n), gain, bias), max_rates,
+                       atol=tolerance)
+
+    if nl_nodirect == nengo.Sigmoid:
+        threshold = 0.5 / nl.tau_ref
+    else:
+        threshold = 0
+
+    assert np.all(nl.rates(intercepts - tolerance, gain, bias) <= threshold)
+    assert np.all(nl.rates(intercepts + tolerance, gain, bias) > threshold)
+
+    if generic:
+        max_rates0, intercepts0 = (
+            nengo.neurons.NeuronType.max_rates_intercepts(nl, gain, bias))
+    else:
+        max_rates0, intercepts0 = nl.max_rates_intercepts(gain, bias)
+
+    assert np.allclose(max_rates, max_rates0, atol=tolerance)
+    assert np.allclose(intercepts, intercepts0, atol=tolerance)

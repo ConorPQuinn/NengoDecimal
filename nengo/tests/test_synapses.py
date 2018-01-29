@@ -2,17 +2,16 @@ import numpy as np
 import pytest
 
 import nengo
-from nengo.processes import WhiteNoise
+from nengo.processes import WhiteSignal
 from nengo.synapses import (
-    Alpha, filt, filtfilt, LinearFilter, Lowpass, SynapseParam)
+    Alpha, LinearFilter, Lowpass, SynapseParam, Triangle)
 from nengo.utils.testing import allclose
 
 
 def run_synapse(Simulator, seed, synapse, dt=1e-3, runtime=1., n_neurons=None):
     model = nengo.Network(seed=seed)
     with model:
-        u = nengo.Node(
-            output=WhiteNoise(runtime, 5).f(rng=np.random.RandomState(seed)))
+        u = nengo.Node(output=WhiteSignal(runtime, high=10))
 
         if n_neurons is not None:
             a = nengo.Ensemble(n_neurons, 1)
@@ -24,8 +23,8 @@ def run_synapse(Simulator, seed, synapse, dt=1e-3, runtime=1., n_neurons=None):
         ref = nengo.Probe(target)
         filtered = nengo.Probe(target, synapse=synapse)
 
-    sim = Simulator(model, dt=dt)
-    sim.run(runtime)
+    with Simulator(model, dt=dt, seed=seed+1) as sim:
+        sim.run(runtime)
 
     return sim.trange(), sim.data[ref], sim.data[filtered]
 
@@ -35,7 +34,7 @@ def test_lowpass(Simulator, plt, seed):
     tau = 0.03
 
     t, x, yhat = run_synapse(Simulator, seed, Lowpass(tau), dt=dt)
-    y = filt(x, tau, dt=dt)
+    y = Lowpass(tau).filt(x, dt=dt, y0=0)
 
     assert allclose(t, y, yhat, delay=dt, plt=plt)
 
@@ -46,9 +45,27 @@ def test_alpha(Simulator, plt, seed):
     num, den = [1], [tau**2, 2*tau, 1]
 
     t, x, yhat = run_synapse(Simulator, seed, Alpha(tau), dt=dt)
-    y = filt(x, LinearFilter(num, den), dt=dt)
+    y = LinearFilter(num, den).filt(x, dt=dt, y0=0)
 
     assert allclose(t, y, yhat, delay=dt, atol=5e-6, plt=plt)
+
+
+def test_triangle(Simulator, plt, seed):
+    dt = 1e-3
+    tau = 0.03
+
+    t, x, ysim = run_synapse(Simulator, seed, Triangle(tau), dt=dt)
+    yfilt = Triangle(tau).filt(x, dt=dt, y0=0)
+
+    # compare with convolved filter
+    n_taps = int(round(tau / dt)) + 1
+    num = np.arange(n_taps, 0, -1, dtype=float)
+    num /= num.sum()
+    y = np.convolve(x.ravel(), num)[:len(t)]
+    y.shape = (-1, 1)
+
+    assert np.allclose(y, yfilt, rtol=0)
+    assert allclose(t, y, ysim, delay=dt, rtol=0, plt=plt)
 
 
 def test_decoders(Simulator, plt, seed):
@@ -58,24 +75,34 @@ def test_decoders(Simulator, plt, seed):
     t, x, yhat = run_synapse(
         Simulator, seed, Lowpass(tau), dt=dt, n_neurons=100)
 
-    y = filt(x, tau, dt=dt)
+    y = Lowpass(tau).filt(x, dt=dt, y0=0)
     assert allclose(t, y, yhat, delay=dt, plt=plt)
 
 
-def test_general(Simulator, plt, seed):
+def test_linearfilter(Simulator, plt, seed):
     dt = 1e-3
 
     # The following num, den are for a 4th order analog Butterworth filter,
-    # generated with `scipy.signal.butter(4, 1. / 0.03, analog=True)`
-    num = np.array([1234567.90123457])
-    den = np.array([1.0, 87.104197658425107, 3793.5706248589954,
-                    96782.441842694592, 1234567.9012345686])
+    # generated with `scipy.signal.butter(4, 0.2, analog=False)`
+    num = np.array(
+        [0.00482434, 0.01929737, 0.02894606, 0.01929737, 0.00482434])
+    den = np.array([1., -2.36951301,  2.31398841, -1.05466541,  0.18737949])
 
-    t, x, yhat = run_synapse(Simulator, seed, LinearFilter(num, den), dt=dt)
-    y = filt(x, LinearFilter(num, den), dt=dt)
+    synapse = LinearFilter(num, den, analog=False)
+    t, x, yhat = run_synapse(Simulator, seed, synapse, dt=dt)
+    y = synapse.filt(x, dt=dt, y0=0)
 
-    # Nengo sim is one timestep behind raw filter
-    assert allclose(t[:-1], y[:-1], yhat[1:], plt=plt)
+    assert allclose(t, y, yhat, delay=dt, plt=plt)
+
+
+def test_step_errors():
+    output = np.zeros(3)
+    with pytest.raises(ValueError):
+        LinearFilter.NoDen([1], [1], output)
+    with pytest.raises(ValueError):
+        LinearFilter.Simple([1, 2], [1], output)
+    with pytest.raises(ValueError):
+        LinearFilter.Simple([1], [1, 2], output)
 
 
 def test_filt(plt, rng):
@@ -92,7 +119,8 @@ def test_filt(plt, rng):
     k = 1. / tau * np.exp(-tk / tau)
     x = np.convolve(u, k, mode='full')[:nt]
 
-    y = filt(u, 0.1, dt=dt)
+    # support lists as input
+    y = Lowpass(0.1).filt(list(u), dt=dt, y0=0)
 
     plt.plot(t, x)
     plt.plot(t, y, '--')
@@ -109,9 +137,9 @@ def test_filtfilt(plt, rng):
     tau = 0.03
 
     u = rng.normal(size=nt)
-    x = filt(u, tau, dt=dt)
-    x = filt(x[::-1], tau, x0=x[-1], dt=dt)[::-1]
-    y = filtfilt(u, tau, dt=dt)
+    x = Lowpass(tau).filt(u, dt=dt)
+    x = Lowpass(tau).filt(x[::-1], y0=x[-1], dt=dt)[::-1]
+    y = Lowpass(tau).filtfilt(u, dt=dt)
 
     plt.plot(t, x)
     plt.plot(t, y, '--')
@@ -129,8 +157,8 @@ def test_lti_lowpass(rng, plt):
     lti = LinearFilter([1], [tau, 1])
 
     u = rng.normal(size=(nt, 10))
-    x = filt(u, tau, dt=dt)
-    y = filt(u, lti, dt=dt)
+    x = Lowpass(tau).filt(u, dt=dt)
+    y = lti.filt(u, dt=dt)
 
     plt.plot(t, x[:, 0], label="Lowpass")
     plt.plot(t, y[:, 0], label="LTI")
@@ -139,10 +167,19 @@ def test_lti_lowpass(rng, plt):
     assert np.allclose(x, y)
 
 
+def test_linearfilter_combine(rng):
+    nt = 3000
+    tau0, tau1 = 0.01, 0.02
+    u = rng.normal(size=(nt, 10))
+    x = LinearFilter([1], [tau0*tau1, tau0+tau1, 1]).filt(u, y0=0)
+    y = Lowpass(tau0).combine(Lowpass(tau1)).filt(u, y0=0)
+    assert np.allclose(x, y)
+
+
 def test_synapseparam():
     """SynapseParam must be a Synapse, and converts numbers to LowPass."""
     class Test(object):
-        sp = SynapseParam(default=Lowpass(0.1))
+        sp = SynapseParam('sp', default=Lowpass(0.1))
 
     inst = Test()
     assert isinstance(inst.sp, Lowpass)
@@ -157,3 +194,24 @@ def test_synapseparam():
     # Non-synapse not OK
     with pytest.raises(ValueError):
         inst.sp = 'a'
+
+
+def test_frozen():
+    """Test attributes inherited from FrozenObject"""
+    a = LinearFilter([1], [0.04, 1])
+    b = LinearFilter([1], [0.04, 1])
+    c = LinearFilter([1], [0.04, 1.1])
+
+    assert hash(a) == hash(a)
+    assert hash(b) == hash(b)
+    assert hash(c) == hash(c)
+
+    assert a == b
+    assert hash(a) == hash(b)
+    assert a != c
+    assert hash(a) != hash(c)  # not guaranteed, but highly likely
+    assert b != c
+    assert hash(b) != hash(c)  # not guaranteed, but highly likely
+
+    with pytest.raises((ValueError, RuntimeError)):
+        a.den[0] = 9

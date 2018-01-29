@@ -2,19 +2,19 @@ import pytest
 
 import nengo
 from nengo import spa
+from nengo.exceptions import SpaParseError
 
 import numpy as np
 
 
-@pytest.mark.slow
-def test_thalamus(Simulator, plt, seed):
+def thalamus_net(d=2, n=20, seed=None):
     model = spa.SPA(seed=seed)
 
     with model:
-        model.vision = spa.Buffer(dimensions=16, neurons_per_dimension=80)
-        model.vision2 = spa.Buffer(dimensions=16, neurons_per_dimension=80)
-        model.motor = spa.Buffer(dimensions=16, neurons_per_dimension=80)
-        model.motor2 = spa.Buffer(dimensions=32, neurons_per_dimension=80)
+        model.vision = spa.Buffer(dimensions=d, neurons_per_dimension=n)
+        model.vision2 = spa.Buffer(dimensions=d, neurons_per_dimension=n)
+        model.motor = spa.Buffer(dimensions=d, neurons_per_dimension=n)
+        model.motor2 = spa.Buffer(dimensions=d * 2, neurons_per_dimension=n)
 
         actions = spa.Actions(
             'dot(vision, A) --> motor=A, motor2=vision*vision2',
@@ -35,13 +35,22 @@ def test_thalamus(Simulator, plt, seed):
                 return '0'
         model.input = spa.Input(vision=input_f, vision2='B*~A')
 
+    return model
+
+
+@pytest.mark.slow
+def test_thalamus(Simulator, plt, seed):
+    model = thalamus_net(d=16, n=80, seed=seed)
+
+    with model:
         input, vocab = model.get_module_input('motor')
         input2, vocab2 = model.get_module_input('motor2')
+
         p = nengo.Probe(input, 'output', synapse=0.03)
         p2 = nengo.Probe(input2, 'output', synapse=0.03)
 
-    sim = Simulator(model)
-    sim.run(0.5)
+    with Simulator(model) as sim:
+        sim.run(0.5)
 
     t = sim.trange()
     data = vocab.dot(sim.data[p].T)
@@ -103,8 +112,8 @@ def test_routing(Simulator, seed, plt):
 
         buff3_probe = nengo.Probe(model.buff3.state.output, synapse=0.03)
 
-    sim = Simulator(model)
-    sim.run(0.6)
+    with Simulator(model) as sim:
+        sim.run(0.6)
 
     data = sim.data[buff3_probe]
 
@@ -127,9 +136,71 @@ def test_routing(Simulator, seed, plt):
     assert valueC[2] < 0.2
 
 
+def test_routing_recurrency_compilation(Simulator, seed):
+    D = 2
+    model = spa.SPA(seed=seed)
+    with model:
+        model.buff1 = spa.Buffer(D, label='buff1')
+        model.buff2 = spa.Buffer(D, label='buff2')
+        actions = spa.Actions('0.5 --> buff2=buff1, buff1=buff2')
+        model.bg = spa.BasalGanglia(actions)
+        model.thal = spa.Thalamus(model.bg)
+
+    with Simulator(model) as sim:
+        assert sim
+
+
+def test_nondefault_routing(Simulator, seed):
+    D = 3
+    model = spa.SPA(seed=seed)
+    with model:
+        model.ctrl = spa.Buffer(16, label='ctrl')
+
+        def input_func(t):
+            if t < 0.2:
+                return 'A'
+            elif t < 0.4:
+                return 'B'
+            else:
+                return 'C'
+        model.input = spa.Input(ctrl=input_func)
+
+        model.buff1 = spa.Buffer(D, label='buff1')
+        model.buff2 = spa.Buffer(D, label='buff2')
+        model.cmp = spa.Compare(D)
+
+        node1 = nengo.Node([0, 1, 0])
+        node2 = nengo.Node([0, 0, 1])
+
+        nengo.Connection(node1, model.buff1.state.input)
+        nengo.Connection(node2, model.buff2.state.input)
+
+        actions = spa.Actions('dot(ctrl, A) --> cmp_A=buff1, cmp_B=buff1',
+                              'dot(ctrl, B) --> cmp_A=buff1, cmp_B=buff2',
+                              'dot(ctrl, C) --> cmp_A=buff2, cmp_B=buff2',
+                              )
+        model.bg = spa.BasalGanglia(actions)
+        model.thal = spa.Thalamus(model.bg)
+
+        compare_probe = nengo.Probe(model.cmp.output, synapse=0.03)
+
+    with Simulator(model) as sim:
+        sim.run(0.6)
+
+    similarity = sim.data[compare_probe]
+
+    valueA = np.mean(similarity[150:200], axis=0)  # should be [1]
+    valueB = np.mean(similarity[350:400], axis=0)  # should be [0]
+    valueC = np.mean(similarity[550:600], axis=0)  # should be [1]
+
+    assert valueA > 0.6
+    assert valueB < 0.3
+    assert valueC > 0.6
+
+
 def test_errors():
     # motor does not exist
-    with pytest.raises(NameError):
+    with pytest.raises(SpaParseError):
         with spa.SPA() as model:
             model.vision = spa.Buffer(dimensions=16)
             actions = spa.Actions('0.5 --> motor=A')

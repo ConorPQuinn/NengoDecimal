@@ -12,12 +12,20 @@ class Cortical(Module):
 
     Parameters
     ----------
-    actions : spa.Actions
-        The actions to implement
-    synapse : float
-        The synaptic filter to use for the connections
-    neurons_cconv : int
-        Number of neurons per circular convolution dimension
+    actions : Actions
+        The actions to implement.
+    synapse : float, optional (Default: 0.01)
+        The synaptic filter to use for the connections.
+    neurons_cconv : int, optional (Default: 200)
+        Number of neurons per circular convolution dimension.
+
+    label : str, optional (Default: None)
+        A name for the ensemble. Used for debugging and visualization.
+    seed : int, optional (Default: None)
+        The seed used for random number generation.
+    add_to_container : bool, optional (Default: None)
+        Determines if this Network will be added to the current container.
+        If None, will be true if currently within a Network.
     """
     def __init__(self, actions, synapse=0.01, neurons_cconv=200,
                  label=None, seed=None, add_to_container=None):
@@ -25,7 +33,6 @@ class Cortical(Module):
         self.actions = actions
         self.synapse = synapse
         self.neurons_cconv = neurons_cconv
-        self._bias = None
 
     def on_add(self, spa):
         Module.on_add(self, spa)
@@ -53,46 +60,44 @@ class Cortical(Module):
                             "Subexpression '%s' from action '%s' is not "
                             "supported by the cortex." % (effect, action))
 
-    @property
-    def bias(self):
-        """Return a bias node; create it if needed."""
-        if self._bias is None:
-            with self:
-                self._bias = nengo.Node([1])
-        return self._bias
-
     def add_direct_effect(self, target_name, value):
         """Make a fixed constant input to a module.
 
         Parameters
         ----------
-        target_name : string
-            The name of the module input to use
-        value : string
-            A semantic pointer to be sent to the module input
+        target_name : str
+            The name of the module input to use.
+        value : str
+            A semantic pointer to be sent to the module input.
         """
+        target_module = self.spa.get_module(target_name)
         sink, vocab = self.spa.get_module_input(target_name)
         transform = np.array([vocab.parse(value).v]).T
 
-        with self.spa:
-            nengo.Connection(self.bias, sink, transform=transform,
+        with target_module:
+            if not hasattr(target_module, 'bias'):
+                target_module.bias = nengo.Node([1],
+                                                label=target_name + " bias")
+            nengo.Connection(target_module.bias, sink, transform=transform,
                              synapse=self.synapse)
 
     def add_route_effect(self, target_name, source_name, transform, inverted):
-        """Connect a module output to a module input
+        """Connect a module output to a module input.
 
         Parameters
         ----------
-        target_name : string
-            The name of the module input to affect
-        source_name : string
-            The name of the module output to read from.  If this output uses
-            a different Vocabulary than the target, a linear transform
+        target_name : str
+            The name of the module input to effect.
+        source_name : str
+            The name of the module output to read from. If this output uses
+            a different vocabulary than the target, a linear transform
             will be applied to convert from one to the other.
-        transform : string
+        transform : str
             A semantic pointer to convolve with the source value before
-            sending it into the target.  This transform takes
-            place in the source Vocabulary.
+            sending it into the target. This transform takes
+            place in the source vocabulary.
+        inverted : bool
+            Whether to invert the transform.
         """
         target, target_vocab = self.spa.get_module_input(target_name)
         source, source_vocab = self.spa.get_module_output(source_name)
@@ -113,10 +118,10 @@ class Cortical(Module):
 
         Parameters
         ----------
-        target_name : string
+        target_name : str
             The name of the module input to affect
-        effect : action_objects.Convolution
-            The details of the convolution to implement
+        effect : Convolution
+            The details of the convolution to implement.
         """
         nengo.spa.action_build.convolution(self, target_name, effect,
                                            self.neurons_cconv, self.synapse)

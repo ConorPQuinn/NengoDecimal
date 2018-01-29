@@ -6,13 +6,12 @@ import logging
 import os
 import re
 import sys
+import threading
 import time
-import warnings
 
 import numpy as np
-import pytest
 
-from .compat import is_string
+from .compat import is_string, reraise
 from .logging import CaptureLogHandler, console_formatter
 
 
@@ -21,6 +20,9 @@ class Mock(object):
         pass
 
     def __call__(self, *args, **kwargs):
+        return Mock()
+
+    def __getitem__(self, key):
         return Mock()
 
     def __mul__(self, other):
@@ -64,7 +66,8 @@ class Recorder(object):
 
     def get_filename(self, ext=''):
         modparts = self.module_name.split('.')[1:]
-        modparts.remove('tests')
+        if 'tests' in modparts:
+            modparts.remove('tests')
         return "%s.%s.%s" % ('.'.join(modparts), self.function_name, ext)
 
     def get_filepath(self, ext=''):
@@ -104,7 +107,14 @@ class Plotter(Recorder):
             if len(self.plt.gcf().get_axes()) > 0:
                 # tight_layout errors if no axes are present
                 self.plt.tight_layout()
-            self.plt.savefig(os.path.join(self.dirname, self.filename))
+
+            savefig_kw = {'bbox_inches': 'tight'}
+            if hasattr(self.plt, 'bbox_extra_artists'):
+                savefig_kw['bbox_extra_artists'] = self.plt.bbox_extra_artists
+                del self.plt.bbox_extra_artists
+
+            self.plt.savefig(os.path.join(self.dirname, self.filename),
+                             **savefig_kw)
             self.plt.close('all')
 
 
@@ -117,13 +127,21 @@ class Analytics(Recorder):
         self.data = {}
         self.doc = {}
 
+    @staticmethod
+    def load(path, module, function_name):
+        modparts = module.split('.')
+        modparts = modparts[1:]
+        modparts.remove('tests')
+
+        return np.load(os.path.join(path, "%s.%s.npz" % (
+            '.'.join(modparts), function_name)))
+
     def __enter__(self):
         return self
 
     def add_data(self, name, data, doc=""):
         if name == self.DOC_KEY:
-            raise ValueError("The name '{0}' is reserved.".format(
-                self.DOC_KEY))
+            raise ValueError("The name '{}' is reserved.".format(self.DOC_KEY))
 
         if self.record:
             self.data[name] = data
@@ -169,64 +187,7 @@ class Logger(Recorder):
             del self.handler
 
 
-class Timer(object):
-    """A context manager for timing a block of code.
-
-    Attributes
-    ----------
-    duration : float
-        The difference between the start and end time (in seconds).
-        Usually this is what you care about.
-    start : float
-        The time at which the timer started (in seconds).
-    end : float
-        The time at which the timer ended (in seconds).
-
-    Example
-    -------
-    >>> import time
-    >>> with Timer() as t:
-    ...    time.sleep(1)
-    >>> assert t.duration >= 1
-    """
-
-    TIMER = time.clock if sys.platform == "win32" else time.time
-
-    def __init__(self):
-        self.start = None
-        self.end = None
-        self.duration = None
-
-    def __enter__(self):
-        self.start = Timer.TIMER()
-        return self
-
-    def __exit__(self, type, value, traceback):
-        self.end = Timer.TIMER()
-        self.duration = self.end - self.start
-
-
-class WarningCatcher(object):
-    def __enter__(self):
-        self.catcher = warnings.catch_warnings(record=True)
-        self.record = self.catcher.__enter__()
-
-    def __exit__(self, type, value, traceback):
-        self.catcher.__exit__(type, value, traceback)
-
-
-class warns(WarningCatcher):
-    def __init__(self, warning_type):
-        self.warning_type = warning_type
-
-    def __exit__(self, type, value, traceback):
-        if not any(r.category is self.warning_type for r in self.record):
-            pytest.fail("DID NOT RAISE")
-
-        super(warns, self).__exit__(type, value, traceback)
-
-
-def allclose(t, targets, signals,  # noqa:C901
+def allclose(t, targets, signals,  # noqa: C901
              atol=1e-8, rtol=1e-5, buf=0, delay=0,
              plt=None, show=False, labels=None, individual_results=False):
     """Ensure all signal elements are within tolerances.
@@ -306,7 +267,8 @@ def allclose(t, targets, signals,  # noqa:C901
 
         ax.set_ylabel('signal')
         if labels[0] is not None:
-            ax.legend(loc='upper left', bbox_to_anchor=(1., 1.))
+            lgd = ax.legend(loc='upper left', bbox_to_anchor=(1., 1.))
+            plt.bbox_extra_artists = (lgd,)
 
         ax = plt.subplot(2, 1, 2)
         if targets.shape[1] == 1:
@@ -339,7 +301,7 @@ def allclose(t, targets, signals,  # noqa:C901
                            atol=atol, rtol=rtol)
 
 
-def find_modules(root_path, prefix=[], pattern='^test_.*\\.py$'):
+def find_modules(root_path, prefix=None, pattern='^test_.*\\.py$'):
     """Find matching modules (files) in all subdirectories of a given path.
 
     Parameters
@@ -358,6 +320,7 @@ def find_modules(root_path, prefix=[], pattern='^test_.*\\.py$'):
         A list of modules. Each item in the list is a list of strings
         containing the module path.
     """
+    prefix = [] if prefix is None else prefix
     if is_string(prefix):
         prefix = [prefix]
     elif not isinstance(prefix, list):
@@ -430,3 +393,56 @@ def load_functions(modules, pattern='^test_', arg_pattern='^Simulator$'):
                 tests[k] = getattr(m, k)
 
     return tests
+
+
+class ThreadedAssertion(object):
+    """Performs assertions in parallel.
+
+    Starts a number of threads, waits for each thread to execute some
+    initialization code, and then executes assertions in each thread.
+    """
+
+    class AssertionWorker(threading.Thread):
+        def __init__(self, parent, barriers, n):
+            super(ThreadedAssertion.AssertionWorker, self).__init__()
+            self.parent = parent
+            self.barriers = barriers
+            self.n = n
+            self.assertion_result = None
+            self.exc_info = (None, None, None)
+
+        def run(self):
+            self.parent.init_thread(self)
+
+            self.barriers[self.n].set()
+            for barrier in self.barriers:
+                barrier.wait()
+
+            try:
+                self.parent.assert_thread(self)
+                self.assertion_result = True
+            except Exception:
+                self.assertion_result = False
+                self.exc_info = sys.exc_info()
+            finally:
+                self.parent.finish_thread(self)
+
+    def __init__(self, n_threads):
+        barriers = [threading.Event() for _ in range(n_threads)]
+        threads = [self.AssertionWorker(self, barriers, i)
+                   for i in range(n_threads)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+            if not t.assertion_result:
+                reraise(*t.exc_info)
+
+    def init_thread(self, worker):
+        pass
+
+    def assert_thread(self, worker):
+        raise NotImplementedError()
+
+    def finish_thread(self, worker):
+        pass

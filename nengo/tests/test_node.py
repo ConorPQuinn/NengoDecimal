@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 import nengo
-from nengo.utils.testing import warns
+from nengo.exceptions import SimulationError, ValidationError
 
 
 def test_time(Simulator):
@@ -10,8 +10,8 @@ def test_time(Simulator):
         u = nengo.Node(output=lambda t: t)
         up = nengo.Probe(u)
 
-    sim = Simulator(model)
-    sim.run(1.0)
+    with Simulator(model) as sim:
+        sim.run(1.0)
 
     t = sim.trange()
     x = sim.data[up].flatten()
@@ -24,9 +24,8 @@ def test_simple(Simulator, plt, seed):
         input = nengo.Node(output=lambda t: np.sin(t))
         p = nengo.Probe(input, 'output')
 
-    sim = Simulator(m)
-    runtime = 0.5
-    sim.run(runtime)
+    with Simulator(m) as sim:
+        sim.run(0.5)
 
     plt.plot(sim.trange(), sim.data[p], label='sin')
     plt.legend(loc='best')
@@ -47,9 +46,8 @@ def test_connected(Simulator, plt, seed):
         p_in = nengo.Probe(input, 'output')
         p_out = nengo.Probe(output, 'output')
 
-    sim = Simulator(m)
-    runtime = 0.5
-    sim.run(runtime)
+    with Simulator(m) as sim:
+        sim.run(0.5)
 
     t = sim.trange()
     plt.plot(t, sim.data[p_in], label='sin')
@@ -81,9 +79,8 @@ def test_passthrough(Simulator, plt, seed):
         in2_p = nengo.Probe(in2, 'output')
         out_p = nengo.Probe(out, 'output')
 
-    sim = Simulator(m)
-    runtime = 0.5
-    sim.run(runtime)
+    with Simulator(m) as sim:
+        sim.run(0.5)
 
     plt.plot(sim.trange(), sim.data[in1_p]+sim.data[in2_p], label='in+in2')
     plt.plot(sim.trange()[:-2], sim.data[out_p][2:], label='out')
@@ -102,20 +99,19 @@ def test_passthrough_filter(Simulator, plt, seed):
         passthrough = nengo.Node(size_in=1)
         v = nengo.Node(output=lambda t, x: x, size_in=1)
 
-        synapse = 0.3
+        synapse = nengo.Lowpass(0.3)
         nengo.Connection(u, passthrough, synapse=None)
         nengo.Connection(passthrough, v, synapse=synapse)
 
         up = nengo.Probe(u)
         vp = nengo.Probe(v)
 
-    dt = 0.001
-    sim = Simulator(m, dt=dt)
-    sim.run(1.0)
+    with Simulator(m) as sim:
+        sim.run(1.0)
 
     t = sim.trange()
     x = sim.data[up]
-    y = nengo.synapses.filt(x, synapse, dt=dt)
+    y = synapse.filt(x, dt=sim.dt, y0=0)
     z = sim.data[vp]
 
     plt.plot(t, x)
@@ -136,39 +132,50 @@ def test_circular(Simulator, seed):
         a_p = nengo.Probe(a, 'output')
         b_p = nengo.Probe(b, 'output')
 
-    sim = Simulator(m)
-    runtime = 0.5
-    sim.run(runtime)
+    with Simulator(m) as sim:
+        sim.run(0.5)
 
     assert np.allclose(sim.data[a_p], sim.data[b_p])
 
 
-def test_function_args_error(Simulator):
+def test_outputparam_errors(Simulator):
     with nengo.Network() as model:
-        with pytest.raises(TypeError):
-            nengo.Node(output=lambda t, x: x+1)
+        # valid values
+        nengo.Node(output=lambda t: t+1)
+        nengo.Node(output=0)
+        nengo.Node(output=[0, 1])
+        nengo.Node(output=nengo.processes.WhiteNoise())
+        nengo.Node(size_in=1)
+
+        # type errors
+        with pytest.raises(ValidationError):
+            nengo.Node(output=object())
+
+        # function errors
         nengo.Node(output=lambda t, x=[0]: t+1, size_in=1)
-        with pytest.raises(TypeError):
+        with pytest.raises(ValidationError):
+            nengo.Node(output=lambda t, x: x+1)
+        with pytest.raises(ValidationError):
             nengo.Node(output=lambda t: t+1, size_in=1)
-        with pytest.raises(TypeError):
+        with pytest.raises(ValidationError):
             nengo.Node(output=lambda t, x, y: t+1, size_in=2)
-        with pytest.raises(TypeError):
+        with pytest.raises(ValidationError):
             nengo.Node(output=[0], size_in=1)
-        with pytest.raises(TypeError):
+        with pytest.raises(ValidationError):
             nengo.Node(output=0, size_in=1)
-    Simulator(model)
 
-
-def test_output_shape_error():
-    with nengo.Network():
-        with pytest.raises(ValueError):
+        # shape errors
+        with pytest.raises(ValidationError):
             nengo.Node(output=[[1, 2], [3, 4]])
-        with pytest.raises(ValueError):
+        with pytest.raises(ValidationError):
             nengo.Node(output=lambda t: [[t, t+1]])
-        with pytest.raises(ValueError):
+        with pytest.raises(ValidationError):
             nengo.Node(output=[[3, 1], [2, 9]], size_out=4)
-        with pytest.raises(ValueError):
+        with pytest.raises(ValidationError):
             nengo.Node(output=[1, 2, 3, 4, 5], size_out=4)
+
+    with Simulator(model):
+        pass
 
 
 def test_none(Simulator, seed):
@@ -188,9 +195,9 @@ def test_none(Simulator, seed):
         a = nengo.Ensemble(10, dimensions=1)
         nengo.Connection(u, a)
 
-    sim = Simulator(model)
-    with pytest.raises(ValueError):
-        sim.run(0.01)
+    with Simulator(model) as sim:
+        with pytest.raises(SimulationError):
+            sim.run(0.01)
 
     # This function will pass (with a warning), because it will
     # be determined at run time that the output function
@@ -202,25 +209,26 @@ def test_none(Simulator, seed):
     with model2:
         nengo.Node(output=none_function)
 
-    sim = Simulator(model2)
-    sim.run(0.01)
+    with Simulator(model2) as sim:
+        sim.run(0.01)
 
 
 def test_unconnected_node(Simulator):
     """Make sure unconnected nodes still run."""
     hits = np.array(0)
+    dt = 0.001
 
     def f(t):
         hits[...] += 1
     model = nengo.Network()
     with model:
         nengo.Node(f, size_in=0, size_out=0)
-    sim = Simulator(model)
-    assert hits == 0
-    sim.step()
-    assert hits == 1
-    sim.step()
-    assert hits == 2
+    with Simulator(model) as sim:
+        assert hits == 0
+        sim.run(dt)
+        assert hits == 1
+        sim.run(dt)
+        assert hits == 2
 
 
 def test_len():
@@ -237,7 +245,6 @@ def test_len():
 
 
 def test_set_output(Simulator):
-    dtype = nengo.rc.get('precision', 'dtype')
     counter = []
 
     def accumulate(t):
@@ -249,7 +256,7 @@ def test_set_output(Simulator):
 
     with nengo.Network() as model:
         # if output is None, size_out == size_in
-        with warns(UserWarning):
+        with pytest.warns(UserWarning):
             # warns since size_in != size_out and output is None
             passthrough = nengo.Node(None, size_in=20, size_out=30)
         assert passthrough.output is None
@@ -257,32 +264,32 @@ def test_set_output(Simulator):
 
         # if output is an array-like...
         # size_in must be 0
-        with pytest.raises(TypeError):
+        with pytest.raises(ValidationError):
             nengo.Node(np.ones(1), size_in=1)
         # size_out must match
-        with pytest.raises(ValueError):
+        with pytest.raises(ValidationError):
             nengo.Node(np.ones(3), size_out=2)
         # must be scalar or vector, not matrix
-        with pytest.raises(ValueError):
+        with pytest.raises(ValidationError):
             nengo.Node(np.ones((2, 2)))
         # scalar gets promoted to float vector
         scalar = nengo.Node(2)
         assert scalar.output.shape == (1,)
-        assert str(scalar.output.dtype) == dtype
+        assert str(scalar.output.dtype) == 'float64'
         # vector stays 1D
         vector = nengo.Node(np.arange(3))
         assert vector.output.shape == (3,)
-        assert str(vector.output.dtype) == dtype
+        assert str(vector.output.dtype) == 'float64'
 
         # if output is callable...
         # if size_in is 0, should only take in t
-        with pytest.raises(TypeError):
+        with pytest.raises(ValidationError):
             nengo.Node(lambda t, x: 2.0, size_in=0)
         # if size_in > 0, should take both t and x
-        with pytest.raises(TypeError):
+        with pytest.raises(ValidationError):
             nengo.Node(lambda t: t ** 2, size_in=1)
         # function must return a scalar or vector, not matrix
-        with pytest.raises(ValueError):
+        with pytest.raises(ValidationError):
             nengo.Node(lambda t: np.ones((2, 2)))
         # if we pass size_out, function should not be called
         assert len(counter) == 0
@@ -293,7 +300,8 @@ def test_set_output(Simulator):
         noreturn_func = nengo.Node(noreturn)
         assert noreturn_func.size_out == 0
 
-    Simulator(model)  # Ensure it all builds
+    with Simulator(model):  # Ensure it all builds
+        pass
 
 
 def test_delay(Simulator, plt):
@@ -305,24 +313,84 @@ def test_delay(Simulator, plt):
         ap = nengo.Probe(a)
         bp = nengo.Probe(b)
 
-    sim = Simulator(model)
-    sim.run(0.005)
+    with Simulator(model) as sim:
+        sim.run(0.005)
 
     plt.plot(sim.trange(), sim.data[ap])
     plt.plot(sim.trange(), -sim.data[bp])
 
 
-def test_args(Simulator, plt):
-    def fn(t, x):
-        assert isinstance(t, float)
-        assert isinstance(x, np.ndarray)
-        assert x.flags.writeable is False
-        assert x[0] == t
+def test_args(Simulator):
+    class Fn(object):
+        def __init__(self):
+            self.last_x = None
+
+        def __call__(self, t, x):
+            assert isinstance(t, float)
+            assert isinstance(x, np.ndarray)
+            assert self.last_x is not x  # x should be a new copy on each call
+            self.last_x = x
+            assert x[0] == t
 
     with nengo.Network() as model:
         u = nengo.Node(lambda t: t)
-        v = nengo.Node(fn, size_in=1, size_out=0)
+        v = nengo.Node(Fn(), size_in=1, size_out=0)
         nengo.Connection(u, v, synapse=None)
 
-    sim = Simulator(model)
-    sim.run(0.01)
+    with Simulator(model) as sim:
+        sim.run(0.01)
+
+
+def test_wrong_output():
+    """Setting a node as an input used to cause unbounded memory allocation."""
+
+    with nengo.Network():
+        node1 = nengo.Node(output=lambda t: t)
+
+        with pytest.raises(ValueError):
+            nengo.Node(node1)
+
+
+def test_seed_error():
+    """Setting a Node seed is currently not implemented."""
+    with nengo.Network():
+        with pytest.raises(NotImplementedError):
+            nengo.Node(seed=1)
+
+
+def test_node_with_offset_array_view(Simulator):
+    v = np.array([[1., 2.], [3., 4.]])
+    with nengo.Network() as model:
+        node = nengo.Node(v[1])
+        probe = nengo.Probe(node)
+        assert probe
+
+    with Simulator(model):
+        pass
+
+
+def test_node_with_unusual_strided_view(Simulator, seed):
+    v = np.array([1., 2.], dtype=complex)  # 16 byte itemsize
+    with nengo.Network(seed=seed) as model:
+        node = nengo.Node(v.real)  # 8 byte itemsize, but 16 byte strides
+        probe = nengo.Probe(node)
+        assert probe
+
+    with Simulator(model):
+        pass
+
+
+@pytest.mark.parametrize("badval", [np.inf, np.nan, "string"])
+def test_invalid_values(Simulator, badval):
+    with nengo.Network() as model:
+        with pytest.raises(ValidationError):
+            node = nengo.Node(badval)
+
+    with nengo.Network() as model:
+        node = nengo.Node(lambda t: badval)
+        ens = nengo.Ensemble(10, 1)
+        nengo.Connection(node, ens)
+
+    with Simulator(model) as sim:
+        with pytest.raises(SimulationError):
+            sim.run(0.01)

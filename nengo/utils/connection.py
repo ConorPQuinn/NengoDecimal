@@ -1,7 +1,11 @@
 from __future__ import absolute_import
 
-import nengo
+import warnings
+
+import numpy as np
+
 from . import numpy as npext
+from ..exceptions import ValidationError
 
 
 def target_function(eval_points, targets):
@@ -21,9 +25,9 @@ def target_function(eval_points, targets):
     Returns
     -------
     dict:
-       A diciontary with two keys: ``function`` and ``eval_points``.
+       A dictionary with two keys: ``function`` and ``eval_points``.
        function is the mapping between the evaluation points and the
-       targets. ``eval_points`` are the evalutaion points that will
+       targets. ``eval_points`` are the evaluation points that will
        be passed to the connection
 
     Examples
@@ -36,15 +40,17 @@ def target_function(eval_points, targets):
     nengo.Connection(ens1, ens2,
                      **target_function(eval_points, targets)
     """
+    warnings.warn("'targets' can be passed directly to the connection through "
+                  "the 'function' argument. That approach is faster, so this "
+                  "function is deprecated and will be removed in the future.")
 
-    dtype = nengo.rc.get('precision', 'dtype')
-    eval_points = npext.array(eval_points, dtype=dtype, min_dims=2)
-    targets = npext.array(targets, dtype=dtype, min_dims=2)
+    eval_points = npext.array(eval_points, dtype=np.float64, min_dims=2)
+    targets = npext.array(targets, dtype=np.float64, min_dims=2)
 
     if len(eval_points) != len(targets):
-        raise ValueError("Number of evaluation points %s "
-                         "is not equal to number of targets "
-                         "%s" % (len(eval_points), len(targets)))
+        raise ValidationError(
+            "Number of evaluation points (%d) is not equal to the number of "
+            "targets (%s)" % (len(eval_points), len(targets)), 'eval_points')
 
     func_dict = {}
     for eval_point, target in zip(eval_points, targets):
@@ -57,3 +63,66 @@ def target_function(eval_points, targets):
     return {'function': function,
             'eval_points': eval_points,
             'scale_eval_points': False}
+
+
+def eval_point_decoding(conn, sim, eval_points=None):
+    """Get the targets and actual decoded values for a set of eval points.
+
+    This function evaluates the static decoding (i.e. using the neuron type's
+    `rates` function) of a connection for a given set of evaluation points.
+
+    Parameters
+    ----------
+    conn : Connection
+        The Connection to evaluate the decoding of.
+    sim : Simulator
+        A Nengo simulator storing the built connection.
+    eval_points : array_like (N, E) (optional)
+        An N x E array of evaluation points to evaluate the decoding for, where
+        N is the number of points and E is the dimensionality of the input
+        ensemble (i.e. `conn.size_in`). If None (default), use the connection's
+        training evaluation points.
+
+    Returns
+    -------
+    eval_points : ndarray (N, E)
+        A shallow copy of the evaluation points used. E is the dimensionality
+        of the connection input ensemble (i.e. `conn.size_in`).
+    targets : ndarray (N, D)
+        The target function value at each evaluation point.
+    decoded : ndarray (N, D)
+        The decoded function value at each evaluation point.
+    """
+    from nengo.builder.ensemble import get_activities
+    from nengo.builder.connection import get_targets
+
+    if eval_points is None:
+        eval_points = sim.data[conn].eval_points
+    else:
+        eval_points = np.asarray(eval_points)
+
+    ens = conn.pre_obj
+    weights = sim.data[conn].weights
+    activities = get_activities(sim.data[ens], ens, eval_points)
+    decoded = np.dot(activities, weights.T)
+    targets = get_targets(conn, eval_points)
+    return eval_points, targets, decoded
+
+
+def function_name(func):
+    """Returns the name of a function.
+
+    Unlike accesing ``func.__name__``, this function is robust to the
+    different types of objects that can be considered a function in Nengo.
+
+    Parameters
+    ----------
+    func : callable or array_like
+        Object used as function argument.
+
+    Returns
+    -------
+    str
+        Name of function object.
+    """
+    return getattr(func, "__name__", func.__class__.__name__)

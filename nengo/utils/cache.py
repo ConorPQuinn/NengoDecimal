@@ -1,9 +1,9 @@
 """Utilities to convert to and from bytes.
 
-Used by nengo.rc in order to present file sizes to users in
+Used by nengo.runcom in order to present file sizes to users in
 human-readable formats.
 
-This code adapted from http://goo.gl/zeJZl under the MIT License.
+This code adapted from https://goo.gl/zeJZl under the MIT License.
 """
 
 
@@ -39,8 +39,10 @@ def human2bytes(s):
     1073741824
     """
     symbols = ('B', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB')
-    letter = s[-2:].strip().upper()
-    num = s[:-2].strip()
+
+    ix = -1 if s[-2].isdigit() else -2
+    letter = s[ix:].strip().upper()
+    num = s[:ix].strip()
     assert letter in symbols
     num = float(num)
     prefix = {symbols[0]: 1}
