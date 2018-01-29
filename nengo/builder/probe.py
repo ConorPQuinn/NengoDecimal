@@ -8,7 +8,7 @@ from nengo.ensemble import Ensemble, Neurons
 from nengo.node import Node
 from nengo.probe import Probe
 from nengo.utils.compat import iteritems
-import nengo.utils.numpy as npext
+
 
 def conn_probe(model, probe):
     conn = Connection(probe.target, probe, synapse=probe.synapse,
@@ -19,7 +19,7 @@ def conn_probe(model, probe):
 
     # Make a sink signal for the connection
     model.sig[probe]['in'] = model.Signal(
-        npext.castDecimal(np.zeros(conn.size_out)), name=str(probe))
+        np.zeros(conn.size_out), name=str(probe))
     model.add_op(Reset(model.sig[probe]['in']))
 
     # Build the connection

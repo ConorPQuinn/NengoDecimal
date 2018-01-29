@@ -169,7 +169,6 @@ class NdarrayParam(Parameter):
         try:
             ndarray = np.asarray(ndarray, dtype=rc.get('precision', 'dtype'))
         except TypeError:
-            raise
             raise ValueError("Must be a float NumPy array (got type '%s')"
                              % ndarray.__class__.__name__)
 

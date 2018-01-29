@@ -33,7 +33,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 """
 
 import numpy as np
-import nengo.utils.numpy as npext
+
 from nengo.rc import rc
 from nengo.utils.compat import StringIO
 
@@ -299,7 +299,7 @@ class Signal(SignalView):
 
     def __init__(self, value, name=None, dtype=rc.get('precision', 'dtype')):
         # Make sure we use a C-contiguous array
-        self._value = np.array(npext.castDecimal(value), copy=False, order='C', dtype=dtype)
+        self._value = np.array(value, copy=False, order='C', dtype=dtype)
         if name is not None:
             self._name = name
         if Signal.assert_named_signals:
@@ -380,7 +380,7 @@ class SignalDict(dict):
                               buffer=base_array.data,
                               offset=byteoffset,
                               strides=bytestrides)
-            return npext.castDecimal(view)
+            return view
         else:
             raise KeyError("%s has not been initialized. Please call "
                            "SignalDict.init first." % (str(obj)))
@@ -405,7 +405,7 @@ class SignalDict(dict):
     def init(self, signal):
         """Set up a permanent mapping from signal -> ndarray."""
         # Make a copy of base.value to start
-        dict.__setitem__(self, signal.base, np.array(npext.castDecimal(signal.base.value)))
+        dict.__setitem__(self, signal.base, np.array(signal.base.value))
 
     def reset(self, signal):
         """Reset ndarray to the base value of the signal that maps to it"""

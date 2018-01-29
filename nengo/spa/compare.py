@@ -55,8 +55,8 @@ class Compare(Module):
         t1 = np.zeros((dimensions * 2, dimensions), dtype=dtype)
         t2 = np.zeros((dimensions * 2, dimensions), dtype=dtype)
         for i in range(dimensions):
-            t1[i * 2, i] = 1
-            t2[i * 2 + 1, i] = 1
+            t1[i * 2, i] = 1.0
+            t2[i * 2 + 1, i] = 1.0
 
         with self:
             nengo.Connection(self.inputA, self.compare.input, transform=t1)

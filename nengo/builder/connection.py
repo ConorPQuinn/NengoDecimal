@@ -1,7 +1,7 @@
 import collections
 
 import numpy as np
-import decimal as dc
+
 import nengo.utils.numpy as npext
 from nengo.builder.builder import Builder
 from nengo.builder.ensemble import gen_eval_points
@@ -31,9 +31,8 @@ def build_linear_system(model, conn, rng):
     else:
         eval_points = gen_eval_points(
             conn.pre_obj, conn.eval_points, rng, conn.scale_eval_points)
-    z= encoders.T / dc.Decimal(conn.pre_obj.radius)
-    #z=np.array([dc.Decimal(p) for p in z])
-    x = np.dot(eval_points, z)
+
+    x = np.dot(eval_points, encoders.T / conn.pre_obj.radius)
     activities = conn.pre_obj.neuron_type.rates(x, gain, bias)
     if np.count_nonzero(activities) == 0:
         raise RuntimeError(
@@ -44,7 +43,7 @@ def build_linear_system(model, conn, rng):
     if conn.function is None:
         targets = eval_points[:, conn.pre_slice]
     else:
-        targets = npext.castDecimal(np.zeros((len(eval_points), conn.size_mid)))
+        targets = np.zeros((len(eval_points), conn.size_mid))
         for i, ep in enumerate(eval_points[:, conn.pre_slice]):
             targets[i] = conn.function(ep)
 
@@ -59,7 +58,6 @@ def build_connection(model, conn):
     # Get input and output connections from pre and post
     def get_prepost_signal(is_pre):
         target = conn.pre_obj if is_pre else conn.post_obj
-        print('pre', conn.pre_obj, 'post', conn.post_obj)
         key = 'out' if is_pre else 'in'
 
         if target not in model.sig:
@@ -112,7 +110,7 @@ def build_connection(model, conn):
         if conn.solver.weights:
             # account for transform
             targets = np.dot(targets, transform.T)
-            transform = np.array(1, dtype=rc.get('precision', 'dtype'))
+            transform = np.array(1., dtype=rc.get('precision', 'dtype'))
 
             decoders, solver_info = solver(
                 activities, targets, rng=rng,
@@ -128,7 +126,7 @@ def build_connection(model, conn):
 
         model.sig[conn]['decoders'] = model.Signal(
             decoders, name="%s.decoders" % conn)
-        signal = model.Signal(npext.castDecimal(np.zeros(signal_size)), name=str(conn))
+        signal = model.Signal(np.zeros(signal_size), name=str(conn))
         model.add_op(Reset(signal))
         model.add_op(DotInc(model.sig[conn]['decoders'],
                             model.sig[conn]['in'],
@@ -145,7 +143,7 @@ def build_connection(model, conn):
     if conn.modulatory:
         # Make a new signal, effectively detaching from post
         model.sig[conn]['out'] = model.Signal(
-            npext.castDecimal(np.zeros(model.sig[conn]['out'].size)),
+            np.zeros(model.sig[conn]['out'].size),
             name="%s.mod_output" % conn)
         model.add_op(Reset(model.sig[conn]['out']))
 
@@ -171,9 +169,7 @@ def build_connection(model, conn):
 
     model.sig[conn]['transform'] = model.Signal(transform,
                                                 name="%s.transform" % conn)
-    print('abcd', model.sig[conn]['out'].value, signal.value)
     if transform.ndim < 2:
-        print('line 174', model.sig[conn]['transform'].value)
         model.add_op(ElementwiseInc(model.sig[conn]['transform'],
                                     signal,
                                     model.sig[conn]['out'],

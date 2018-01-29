@@ -3,7 +3,7 @@ import numpy as np
 from nengo.builder.builder import Builder
 from nengo.builder.operator import DotInc, Operator, Reset
 from nengo.node import Node
-import nengo.utils.numpy as npext
+
 
 class SimPyFunc(Operator):
     """Set signal `output` by some non-linear function of x, possibly t"""
@@ -47,13 +47,13 @@ class SimPyFunc(Operator):
 
 def build_pyfunc(model, fn, t_in, n_in, n_out, label):
     if n_in:
-        sig_in = model.Signal(npext.castDecimal(np.zeros(n_in)), name="%s.input" % label)
+        sig_in = model.Signal(np.zeros(n_in), name="%s.input" % label)
         model.add_op(Reset(sig_in))
     else:
         sig_in = None
 
     if n_out > 0:
-        sig_out = model.Signal(npext.castDecimal(np.zeros(n_out)), name="%s.output" % label)
+        sig_out = model.Signal(np.zeros(n_out), name="%s.output" % label)
     else:
         sig_out = None
 
@@ -68,7 +68,7 @@ def build_node(model, node):
     if node.output is None or callable(node.output):
         if node.size_in > 0:
             model.sig[node]['in'] = model.Signal(
-                npext.castDecimal(np.zeros(node.size_in)), name="%s.signal" % node)
+                np.zeros(node.size_in), name="%s.signal" % node)
             # Reset input signal to 0 each timestep
             model.add_op(Reset(model.sig[node]['in']))
 

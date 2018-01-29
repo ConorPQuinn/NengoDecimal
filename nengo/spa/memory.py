@@ -30,9 +30,9 @@ class Memory(Buffer):
             add_to_container=add_to_container)
 
         if tau is None:
-            transform = 1
+            transform = 1.0
         else:
-            transform = 1 - synapse / tau
+            transform = 1.0 - synapse / tau
 
         with self:
             nengo.Connection(self.state.output, self.state.input,

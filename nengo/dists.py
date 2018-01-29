@@ -1,7 +1,6 @@
 from __future__ import absolute_import
 import numpy as np
 
-
 import nengo.utils.numpy as npext
 
 
@@ -100,11 +99,10 @@ class Uniform(Distribution):
     def sample(self, n, d=None, rng=np.random):
         shape = (n,) if d is None else (n, d)
         if self.integer:
-            a = rng.randint(low=self.low, high=self.high, size=shape)
+            return rng.randint(low=self.low, high=self.high, size=shape)
         else:
-            a = rng.uniform(low=self.low, high=self.high, size=shape)
+            return rng.uniform(low=self.low, high=self.high, size=shape)
 
-        return npext.castDecimal(a)
 
 class Gaussian(Distribution):
     """A Gaussian distribution.
@@ -141,8 +139,8 @@ class Gaussian(Distribution):
 
     def sample(self, n, d=None, rng=np.random):
         shape = (n,) if d is None else (n, d)
-        a= rng.normal(loc=self.mean, scale=self.std, size=shape)
-        return npext.castDecimal(a)
+        return rng.normal(loc=self.mean, scale=self.std, size=shape)
+
 
 class UniformHypersphere(Distribution):
     """Distributions over an n-dimensional unit hypersphere.
@@ -179,7 +177,7 @@ class UniformHypersphere(Distribution):
         # in n-space and not all bunched up at the centre of the sphere.
         samples *= rng.rand(n, 1) ** (1.0 / d)
 
-        return npext.castDecimal(samples)
+        return samples
 
 
 class Choice(Distribution):
@@ -228,7 +226,7 @@ class Choice(Distribution):
                              "(got %d)" % (d, np.prod(self.options.shape[1:])))
 
         i = np.searchsorted(np.cumsum(self.p), rng.rand(n))
-        return npext.castDecimal(self.options[i])
+        return self.options[i]
 
 
 class SqrtBeta(Distribution):
@@ -253,8 +251,7 @@ class SqrtBeta(Distribution):
 
     def sample(self, num, d=None, rng=np.random):
         shape = (num,) if d is None else (num, d)
-        a = np.sqrt(rng.beta(self.m / 2.0, self.n / 2.0, size=shape))
-        return npext.castDecimal(a)
+        return np.sqrt(rng.beta(self.m / 2.0, self.n / 2.0, size=shape))
 
     def pdf(self, x):
         """Probability distribution function.

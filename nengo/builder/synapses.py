@@ -1,5 +1,5 @@
 import numpy as np
-import nengo.utils.numpy as npext
+
 from nengo.builder.builder import Builder
 from nengo.builder.operator import Operator
 from nengo.synapses import Lowpass, Synapse
@@ -45,7 +45,7 @@ def filtered_signal(model, owner, sig, synapse):
 def build_synapse(model, synapse, owner, input_signal):
     model.sig[owner]['synapse_in'] = input_signal
     model.sig[owner]['synapse_out'] = model.Signal(
-        npext.castDecimal(np.zeros(input_signal.shape)),
+        np.zeros(input_signal.shape),
         name="%s.%s" % (input_signal.name, synapse))
 
     model.add_op(SimSynapse(input=model.sig[owner]['synapse_in'],

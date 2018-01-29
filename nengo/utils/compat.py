@@ -2,7 +2,7 @@ from __future__ import absolute_import
 
 import collections
 import sys
-import decimal 
+
 import numpy as np
 
 # Only test for Python 2 so that we have less changes for Python 4
@@ -85,7 +85,7 @@ def is_iterable(obj):
 
 def is_number(obj, check_complex=False):
     types = ((float, complex, np.number) if check_complex else
-             (float, np.floating, decimal.Decimal ))
+             (float, np.floating))
     return is_integer(obj) or isinstance(obj, types)
 
 

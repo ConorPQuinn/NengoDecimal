@@ -2,11 +2,11 @@
 Extra functions to extend the capabilities of Numpy.
 """
 from __future__ import absolute_import
-import decimal as dc
+
 import numpy as np
 
 maxint = np.iinfo(np.int32).max
-
+import decimal as dc
 
 def compare(a, b):
     return 0 if a == b else 1 if a > b else -1 if a < b else None
@@ -83,8 +83,6 @@ def norm(x, axis=None, keepdims=False):
         If True, the reduced axes are left in the result. See `np.sum` in
         newer versions of Numpy (>= 1.7).
     """
-
-    
     y = np.sqrt(np.sum(x**2, axis=axis))
     return np.expand_dims(y, axis=axis) if keepdims else y
 
@@ -151,6 +149,25 @@ def castDecimal(x):
         x = [dc.Decimal(p) for p in x]
     else:
         x = dc.Decimal(x)
+        
+    #print('casted', x)
+        
+    return x
+
+def castFloat(x):
+    
+  
+    if isinstance(x, np.ndarray):
+        if len(x.shape) == 1:
+            x = np.array([float(p) for p in x]).astype(np.float64)
+        elif len(x.shape) == 2:
+            x = np.array([[float(p)  for p in y] for y in x]).astype(np.float64)
+        elif len(x.shape) == 0:
+            x = np.array(float(x)).astype(np.float64)
+    elif isinstance(x, list):
+        x = [float(p) for p in x]
+    else:
+        x = np.float64(float(x))
         
     #print('casted', x)
         
